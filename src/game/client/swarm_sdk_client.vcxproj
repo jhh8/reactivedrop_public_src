@@ -1433,6 +1433,7 @@ if exist ..\..\devtools\bin\postbuild.cmd ..\..\devtools\bin\postbuild.cmd clien
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
       </PrecompiledHeader>
     </ClCompile>
+    <ClCompile Include="swarm\gameui\swarm\vdemos.cpp" />
     <ClCompile Include="swarm\gameui\swarm\vdownloadcampaign.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
       </PrecompiledHeader>
@@ -1714,6 +1715,7 @@ if exist ..\..\devtools\bin\postbuild.cmd ..\..\devtools\bin\postbuild.cmd clien
     <ClCompile Include="swarm\rd_steam_input_binds.cpp" />
     <ClCompile Include="swarm\rd_swarmopedia.cpp" />
     <ClCompile Include="swarm\rd_text_filtering.cpp" />
+    <ClCompile Include="swarm\rd_tooltip_fix.cpp" />
     <ClCompile Include="swarm\vgui\asw_build_map_frame.cpp" />
     <ClCompile Include="swarm\vgui\asw_circularprogressbar.cpp" />
     <ClCompile Include="swarm\vgui\asw_hudelement.cpp" />
@@ -2747,6 +2749,7 @@ if exist ..\..\devtools\bin\postbuild.cmd ..\..\devtools\bin\postbuild.cmd clien
     <ClInclude Include="swarm\gameui\swarm\vcontrolleroptionsbuttons.h" />
     <ClInclude Include="swarm\gameui\swarm\vcontrolleroptionssticks.h" />
     <ClInclude Include="swarm\gameui\swarm\vcustomcampaigns.h" />
+    <ClInclude Include="swarm\gameui\swarm\vdemos.h" />
     <ClInclude Include="swarm\gameui\swarm\vdownloadcampaign.h" />
     <ClInclude Include="swarm\gameui\swarm\vdownloads.h" />
     <ClInclude Include="swarm\gameui\swarm\vdropdownmenu.h" />
