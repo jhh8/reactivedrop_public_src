@@ -8,11 +8,12 @@
 #include "glow_outline_effect.h"
 #include "object_motion_blur_effect.h"
 #include "asw_player_shared.h"
+#include "iasw_client_aim_target.h"
 
 class C_ASW_Player;
 class C_ASW_Weapon;
 
-class C_ASW_Inhabitable_NPC : public C_AI_BaseNPC
+class C_ASW_Inhabitable_NPC : public C_AI_BaseNPC, public IASW_Client_Aim_Target
 {
 public:
 	DECLARE_CLASS( C_ASW_Inhabitable_NPC, C_AI_BaseNPC );
@@ -21,6 +22,8 @@ public:
 
 	C_ASW_Inhabitable_NPC();
 	virtual ~C_ASW_Inhabitable_NPC();
+
+	bool IsInhabitableNPC() const override { return true; }
 
 	virtual bool IsInhabited();
 	C_ASW_Player *GetCommander() const;
@@ -35,6 +38,9 @@ public:
 	virtual bool IsAlien( void ) const { return false; }
 	virtual void ClientThink( void ) override;
 
+	// health
+	virtual int	GetHealth() const { return m_iHealth; }
+
 	// using entities over time
 	C_BaseEntity *GetUsingEntity() { return m_hUsingEntity.Get(); }
 	CNetworkHandle( C_BaseEntity, m_hUsingEntity );	// if set, marine will face this object
@@ -45,6 +51,7 @@ public:
 
 	C_ASW_Weapon *GetActiveASWWeapon( void ) const;
 	C_ASW_Weapon *GetASWWeapon( int index ) const;
+	int m_iDamageAttributeEffects;
 
 	void TickRedName( float delta );
 	float m_fRedNamePulse;	// from 0 to 1, how red the marine's name should appear on the HUD for medics
@@ -71,6 +78,22 @@ public:
 	// Glows are enabled when the sniper scope is used
 	CGlowObject m_GlowObject;
 	CMotionBlurObject m_MotionBlurObject;
+
+	virtual void MakeTracer( const Vector &vecTracerSrc, const trace_t &tr, int iTracerType );
+	virtual void MakeUnattachedTracer( const Vector &vecTracerSrc, const trace_t &tr, int iTracerType );
+
+	// aim target interface
+	IMPLEMENT_AUTO_LIST_GET();
+
+	virtual float GetRadius() { return 23; }
+	virtual bool IsAimTarget() { return GetHealth() > 0; }
+	virtual const Vector &GetAimTargetPos( const Vector &vecFiringSrc, bool bWeaponPrefersFlatAiming ) { return m_vecLastRenderedPos; }
+	virtual const Vector &GetAimTargetRadiusPos( const Vector &vecFiringSrc ) { return m_vecAutoTargetRadiusPos; }
+	virtual Vector GetLocalAutoTargetRadiusPos() { return m_vecLastRenderedPos; }
+
+	// storing our location for autoaim
+	Vector m_vecLastRenderedPos;
+	Vector m_vecAutoTargetRadiusPos;
 
 private:
 	C_ASW_Inhabitable_NPC( const C_ASW_Inhabitable_NPC & ) = delete; // not defined, not accessible

@@ -644,7 +644,7 @@ ConVar	sk_max_asw_gl( "sk_max_asw_gl", "18", FCVAR_REPLICATED | FCVAR_CHEAT );
 ConVar	sk_npc_dmg_asw_sniper( "sk_npc_dmg_asw_sniper", "0", FCVAR_REPLICATED | FCVAR_CHEAT );
 ConVar	sk_max_asw_sniper( "sk_max_asw_sniper", "60", FCVAR_REPLICATED | FCVAR_CHEAT );
 
-// Desert Eagle (9 clips, 7 per)
+// Bulldog (9 clips, 7 per)
 ConVar	sk_plr_dmg_asw_deagle( "sk_plr_dmg_asw_deagle", "75", FCVAR_REPLICATED | FCVAR_CHEAT );
 ConVar	sk_npc_dmg_asw_deagle( "sk_npc_dmg_asw_deagle", "75", FCVAR_REPLICATED | FCVAR_CHEAT );
 ConVar	sk_max_asw_deagle( "sk_max_asw_deagle", "63", FCVAR_REPLICATED | FCVAR_CHEAT );
@@ -654,7 +654,7 @@ ConVar	sk_plr_dmg_asw_devastator( "sk_plr_dmg_asw_devastator", "10", FCVAR_REPLI
 ConVar	sk_npc_dmg_asw_devastator( "sk_npc_dmg_asw_devastator", "10", FCVAR_REPLICATED | FCVAR_CHEAT );
 ConVar	sk_max_asw_devastator( "sk_max_asw_devastator", "70", FCVAR_REPLICATED | FCVAR_CHEAT );
 
-// 50 Cal Magine Gun
+// 50 Cal Machine Gun
 ConVar	sk_plr_dmg_asw_50calmg( "sk_plr_dmg_asw_50calmg", "0", FCVAR_REPLICATED | FCVAR_CHEAT );
 ConVar	sk_npc_dmg_asw_50calmg( "sk_npc_dmg_asw_50calmg", "0", FCVAR_REPLICATED | FCVAR_CHEAT );
 ConVar	sk_max_asw_50calmg( "sk_max_asw_50calmg", "0", FCVAR_REPLICATED | FCVAR_CHEAT );
@@ -678,6 +678,12 @@ ConVar	sk_max_asw_hr_g( "sk_max_asw_hr_g", "5", FCVAR_REPLICATED | FCVAR_CHEAT )
 ConVar	sk_plr_dmg_asw_medrifle( "sk_plr_dmg_asw_medrifle", "7", FCVAR_REPLICATED | FCVAR_CHEAT );
 ConVar	sk_npc_dmg_asw_medrifle( "sk_npc_dmg_asw_medrifle", "7", FCVAR_REPLICATED | FCVAR_CHEAT );
 ConVar	sk_max_asw_medrifle( "sk_max_asw_medrifle", "504", FCVAR_REPLICATED | FCVAR_CHEAT );
+
+// AR2 (6 clips, 30 per)
+ConVar	sk_plr_dmg_ar2( "sk_plr_dmg_ar2", "8", FCVAR_REPLICATED | FCVAR_CHEAT );
+ConVar	sk_npc_dmg_ar2( "sk_npc_dmg_ar2", "8", FCVAR_REPLICATED | FCVAR_CHEAT );
+ConVar	sk_max_ar2( "sk_max_ar2", "180", FCVAR_REPLICATED | FCVAR_CHEAT );
+ConVar	sk_max_ar2_altfire( "sk_max_ar2_altfire", "3", FCVAR_REPLICATED | FCVAR_CHEAT );
 
 ConVar sk_asw_parasite_infest_dmg_easy( "sk_asw_parasite_infest_dmg_easy", "175", FCVAR_REPLICATED | FCVAR_CHEAT, "Total damage from parasite infestation" );
 ConVar sk_asw_parasite_infest_dmg_normal( "sk_asw_parasite_infest_dmg_normal", "225", FCVAR_REPLICATED | FCVAR_CHEAT, "Total damage from parasite infestation" );
@@ -706,6 +712,7 @@ ConVar	rd_combat_rifle_dmg_base("rd_combat_rifle_dmg_base", "0", FCVAR_REPLICATE
 ConVar	rd_heavy_rifle_dmg_base("rd_heavy_rifle_dmg_base", "0", FCVAR_REPLICATED | FCVAR_CHEAT, "Base damage of heavy rifle", true, 0, false, 0);
 ConVar	rd_medrifle_dmg_base("rd_medrifle_dmg_base", "0", FCVAR_REPLICATED | FCVAR_CHEAT, "Base damage of medical rifle", true, 0, false, 0);
 ConVar	rd_grenades_dmg_base( "rd_grenades_dmg_base", "0", FCVAR_REPLICATED | FCVAR_CHEAT, "Base damage of hand grenades", true, 0, false, 0);
+ConVar	rd_ar2_dmg_base( "rd_ar2_dmg_base", "0", FCVAR_REPLICATED | FCVAR_CHEAT, "Base damage of AR2", true, 0, false, 0 );
 
 ConVar asw_flare_autoaim_radius("asw_flare_autoaim_radius", "250", FCVAR_REPLICATED | FCVAR_CHEAT, "Radius of autoaim effect from flares");
 ConVar asw_vote_kick_fraction("asw_vote_kick_fraction", "0.6", FCVAR_REPLICATED, "Fraction of players needed to activate a kick vote");
@@ -742,9 +749,9 @@ ConVar rd_slowmo( "rd_slowmo", "1", FCVAR_NONE, "If 0 env_slomo will be deleted 
 #endif
 ConVar rd_queen_hud_suppress_time( "rd_queen_hud_suppress_time", "-1.0", FCVAR_CHEAT | FCVAR_REPLICATED, "Hides the Swarm Queen's health HUD if not damaged for this long (-1 to always show)" );
 ConVar rd_anniversary_week_debug( "rd_anniversary_week_debug", "-1", FCVAR_CHEAT | FCVAR_REPLICATED, "Set to 1 to force anniversary week logic; 0 to force off" );
+extern ConVar asw_stats_verbose;
 
 #define ADD_STAT( field, amount ) \
-			ConVarRef asw_stats_verbose( "asw_stats_verbose" );\
 			if ( asw_stats_verbose.GetBool() ) \
 			{ \
 				DevMsg( "marine %d (%s %d+%d)\n", ASWGameResource()->GetMarineResourceIndex( pMR ), #field, pMR->field, amount ); \
@@ -1214,7 +1221,8 @@ CAmmoDef *GetAmmoDef()
 	{
 		bInitted = true;
 
-		def.AddAmmoType("AR2",				DMG_BULLET,					TRACER_LINE_AND_WHIZ,	"sk_plr_dmg_asw_r",			"sk_npc_dmg_asw_r",			"sk_max_asw_r",			BULLET_IMPULSE(200, 1225), 0 );
+		def.AddAmmoType( "AR2", DMG_BULLET, TRACER_LINE_AND_WHIZ, "sk_plr_dmg_ar2", "sk_npc_dmg_ar2", "sk_max_ar2", BULLET_IMPULSE( 200, 1225 ), 0 );
+		def.AddAmmoType( "AR2G", DMG_DISSOLVE, TRACER_NONE, NULL, NULL, "sk_max_ar2_altfire", 0, 0 );
 		// asw ammo
 		//				name				damagetype					tracertype				player dmg					npc damage					carry					physics force impulse		flags
 		// rifle  DMG_BULLET
@@ -5691,6 +5699,9 @@ bool CAlienSwarm::ShouldCollide( int collisionGroup0, int collisionGroup1 )
 	SHOULD_COLLIDE( ASW_COLLISION_GROUP_NPC_GRENADES, ASW_COLLISION_GROUP_CEILINGS, false );
 	SHOULD_COLLIDE( ASW_COLLISION_GROUP_PLAYER_MISSILE, ASW_COLLISION_GROUP_CEILINGS, false );
 	SHOULD_COLLIDE( ASW_COLLISION_GROUP_ALIEN_MISSILE, ASW_COLLISION_GROUP_CEILINGS, false );
+
+	// combine balls don't hit each other
+	SHOULD_COLLIDE( HL2COLLISION_GROUP_COMBINE_BALL, HL2COLLISION_GROUP_COMBINE_BALL, false );
 
 	// the pellets that the flamer shoots.  Doesn't collide with small aliens or marines, DOES collide with doors and shieldbugs
 	SHOULD_COLLIDE( ASW_COLLISION_GROUP_EGG, ASW_COLLISION_GROUP_FLAMER_PELLETS, false );

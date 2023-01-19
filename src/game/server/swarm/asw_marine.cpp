@@ -93,6 +93,7 @@
 
 #define ASW_DEFAULT_MARINE_MODEL "models/swarm/marine/marine.mdl"
 
+extern ConVar asw_stats_verbose;
 ConVar rd_frags_limit( "rd_frags_limit", "20",  FCVAR_REPLICATED, "Number of frags a player must reach to win the round");
 ConVar rd_chatter_about_ff( "rd_chatter_about_ff", "1",  FCVAR_REPLICATED, "If 1 marines will shout about friendly fire done to them");
 ConVar rd_chatter_about_marine_death( "rd_chatter_about_marine_death", "1",  FCVAR_REPLICATED, "If 1 marines will shout Marine Down if marine dies");
@@ -114,7 +115,6 @@ ConVar rda_marine_strafe_push_vert_velocity("rda_marine_strafe_push_vert_velocit
 #define ADD_STAT( field, amount ) \
 		if ( CASW_Marine_Resource *pMR = GetMarineResource() ) \
 		{ \
-			ConVarRef asw_stats_verbose( "asw_stats_verbose" );\
 			if ( asw_stats_verbose.GetBool() ) \
 			{ \
 				DevMsg( "marine %d (%s %d+%d)\n", ASWGameResource()->GetMarineResourceIndex( pMR ), #field, pMR->field, amount ); \
@@ -1201,17 +1201,6 @@ void CASW_Marine::SetMarineResource(CASW_Marine_Resource *pMR)
 			PrecacheSpeech();
 		}
 	}
-}
-
-
-void CASW_Marine::DoImpactEffect( trace_t &tr, int nDamageType )
-{
-	// don't do impact effects, they're simulated clientside by the tracer usermessage
-}
-
-void CASW_Marine::DoMuzzleFlash()
-{
-	// asw - muzzle flashes are triggered by tracer usermessages instead to save bandwidth
 }
 
 extern ConVar rd_marine_ff_fist;
@@ -3158,7 +3147,7 @@ bool CASW_Marine::RefillHealGun(CBaseEntity *pWeaponPickup)
 bool CASW_Marine::DropWeapon(int iWeaponIndex, bool bNoSwap)
 {
 	CASW_Weapon* pWeapon = GetASWWeapon(iWeaponIndex);
-	if (!pWeapon)
+	if ( !pWeapon || !pWeapon->CanHolster() )
 		return false;
 
 	RemoveWeaponPowerup( pWeapon );
@@ -5278,17 +5267,6 @@ bool CASW_Marine::IsOutOfAmmo()
 
 void CASW_Marine::OnWeaponOutOfAmmo(bool bChatter)
 {
-//	CASW_Weapon *cur_weapon = GetActiveASWWeapon();
-// 	if ( cur_weapon )
-// 	{
-// 		if ( !stricmp(cur_weapon->GetPickupClass(), "asw_pickup_rifle") ||
-// 			!stricmp(cur_weapon->GetPickupClass(), "asw_pickup_prifle") )
-// 		{
-// 			this->GiveAmmo( 1000, cur_weapon->GetPrimaryAmmoType() );
-// 			return;
-// 		}
-// 	}
-
 	if ( bChatter && GetMarineSpeech() && rd_notify_about_out_of_ammo.GetBool() )
 	{
 		GetMarineSpeech()->Chatter(CHATTER_NO_AMMO);

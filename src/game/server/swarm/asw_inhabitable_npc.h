@@ -10,6 +10,8 @@ class CASW_Weapon;
 class CEnvTonemapController;
 class CTonemapTrigger;
 
+#define ASW_ALIEN_HEALTH_BITS 14
+
 class CASW_Inhabitable_NPC : public CAI_PlayerAlly
 {
 public:
@@ -20,6 +22,8 @@ public:
 
 	CASW_Inhabitable_NPC();
 	virtual ~CASW_Inhabitable_NPC();
+
+	bool IsInhabitableNPC() const override { return true; }
 
 	void SetCommander( CASW_Player *player );
 	CASW_Player *GetCommander() const;
@@ -39,6 +43,7 @@ public:
 
 	CASW_Weapon *GetASWWeapon( int index ) const;
 	CASW_Weapon *GetActiveASWWeapon() const;
+	int m_iDamageAttributeEffects;
 
 	virtual bool StartUsing( CBaseEntity *pEntity );
 	virtual void StopUsing();
@@ -75,6 +80,11 @@ public:
 	void OnTonemapTriggerStartTouch( CTonemapTrigger *pTonemapTrigger );
 	void OnTonemapTriggerEndTouch( CTonemapTrigger *pTonemapTrigger );
 	CUtlVector<CHandle<CTonemapTrigger>> m_hTriggerTonemapList;
+
+	virtual void DoImpactEffect( trace_t &tr, int nDamageType );
+	virtual void DoMuzzleFlash();
+	virtual void MakeTracer( const Vector &vecTracerSrc, const trace_t &tr, int iTracerType );
+	virtual void MakeUnattachedTracer( const Vector &vecTracerSrc, const trace_t &tr, int iTracerType );
 };
 
 #endif /* ASW_INHABITABLE_NPC_H */

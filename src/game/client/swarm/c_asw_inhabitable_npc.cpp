@@ -3,6 +3,7 @@
 #include "c_asw_player.h"
 #include "c_asw_weapon.h"
 #include "game_timescale_shared.h"
+#include "c_te_effect_dispatch.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -18,6 +19,7 @@ IMPLEMENT_CLIENTCLASS_DT( C_ASW_Inhabitable_NPC, DT_ASW_Inhabitable_NPC, CASW_In
 	RecvPropBool( RECVINFO( m_bInhabited ) ),
 	RecvPropBool( RECVINFO( m_bWalking ) ),
 	RecvPropIntWithMinusOneFlag( RECVINFO( m_iControlsOverride ) ),
+	RecvPropInt( RECVINFO( m_iHealth ) ),
 END_RECV_TABLE()
 
 BEGIN_PREDICTION_DATA( C_ASW_Inhabitable_NPC )
@@ -105,6 +107,8 @@ void C_ASW_Inhabitable_NPC::PostDataUpdate( DataUpdateType_t updateType )
 		MDLCACHE_CRITICAL_SECTION();
 		ShutdownPredictable();
 	}
+
+	SetNextClientThink( CLIENT_THINK_ALWAYS );
 }
 
 bool C_ASW_Inhabitable_NPC::ShouldPredict()
@@ -126,6 +130,9 @@ void C_ASW_Inhabitable_NPC::InitPredictable( C_BasePlayer *pOwner )
 void C_ASW_Inhabitable_NPC::ClientThink()
 {
 	BaseClass::ClientThink();
+
+	m_vecLastRenderedPos = WorldSpaceCenter();
+	m_vecAutoTargetRadiusPos = GetLocalAutoTargetRadiusPos();
 
 	C_ASW_Player *pPlayer = C_ASW_Player::GetLocalASWPlayer();
 	if ( rd_highlight_active_character.GetBool() && pPlayer && pPlayer->GetViewNPC() == this )
@@ -229,4 +236,30 @@ ASW_Controls_t C_ASW_Inhabitable_NPC::GetASWControls()
 	}
 
 	return ( ASW_Controls_t )asw_controls.GetInt();
+}
+
+void C_ASW_Inhabitable_NPC::MakeTracer( const Vector &vecTracerSrc, const trace_t &tr, int iTracerType )
+{
+	const char *tracer = "ASWUTracer";
+	if ( GetActiveASWWeapon() )
+		tracer = GetActiveASWWeapon()->GetUTracerType();
+
+	CEffectData data;
+	data.m_vOrigin = tr.endpos;
+	data.m_hEntity = this;
+	data.m_nMaterial = m_iDamageAttributeEffects;
+
+	DispatchEffect( tracer, data );
+}
+
+void C_ASW_Inhabitable_NPC::MakeUnattachedTracer( const Vector &vecTracerSrc, const trace_t &tr, int iTracerType )
+{
+	const char *tracer = "ASWUTracerUnattached";
+
+	CEffectData data;
+	data.m_vOrigin = tr.endpos;
+	data.m_hEntity = this;
+	data.m_vStart = vecTracerSrc;
+
+	DispatchEffect( tracer, data );
 }

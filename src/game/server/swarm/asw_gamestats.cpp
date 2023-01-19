@@ -46,7 +46,7 @@
 
 // Must run with -gamestats to be able to turn on/off stats with ConVar below.
 static ConVar asw_stats_track( "asw_stats_track", "0", FCVAR_ARCHIVE, "Turn on//off Infested stats tracking." );
-static ConVar asw_stats_verbose( "asw_stats_verbose", "0", FCVAR_NONE, "Turn on//off verbose logging of stats." );
+ConVar asw_stats_verbose( "asw_stats_verbose", "0", FCVAR_NONE, "Turn on//off verbose logging of stats." );
 static ConVar asw_stats_nogameplaycheck( "asw_stats_nogameplaycheck", "0", FCVAR_NONE , "Disable normal check for valid gameplay, send stats regardless." );
 
 CASWGameStats CASW_GameStats;
@@ -87,6 +87,13 @@ static Class_T GetWeaponClassFromDamageInfo( const CTakeDamageInfo & info, CBase
 		// the box of grenades gets credit for the grenade's hard work
 		// this says a lot about our society
 		return (Class_T)CLASS_ASW_GAS_GRENADES;
+	}
+	else if ( weaponClass == CLASS_ASW_AR2 )
+	{
+		if ( info.GetDamageType() & DMG_DISSOLVE )
+		{
+			return (Class_T)CLASS_ASW_COMBINE_BALL;
+		}
 	}
 	return weaponClass;
 }
@@ -432,9 +439,14 @@ void CASWGameStats::Event_MarineWeaponFired( const CBaseEntity *pWeapon, const C
 		{
 			weaponClass = (Class_T)CLASS_ASW_COMBAT_RIFLE_SHOTGUN;
 		}
+		else if ( weaponClass == CLASS_ASW_AR2 )
+		{
+			weaponClass = (Class_T)CLASS_ASW_COMBINE_BALL;
+		}
 		else
 		{
-			weaponClass = (Class_T)(255 - weaponClass);
+			Assert( 0 );
+			weaponClass = (Class_T)(1024 - weaponClass);
 		}
 	}
 

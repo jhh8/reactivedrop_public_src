@@ -19,6 +19,7 @@ IMPLEMENT_SERVERCLASS_ST( CASW_Inhabitable_NPC, DT_ASW_Inhabitable_NPC )
 	SendPropBool( SENDINFO( m_bInhabited ) ),
 	SendPropBool( SENDINFO( m_bWalking ) ),
 	SendPropIntWithMinusOneFlag( SENDINFO( m_iControlsOverride ) ),
+	SendPropInt( SENDINFO( m_iHealth ), ASW_ALIEN_HEALTH_BITS ),
 END_SEND_TABLE()
 
 BEGIN_DATADESC( CASW_Inhabitable_NPC )
@@ -225,4 +226,59 @@ void CASW_Inhabitable_NPC::OnTonemapTriggerStartTouch( CTonemapTrigger *pTonemap
 void CASW_Inhabitable_NPC::OnTonemapTriggerEndTouch( CTonemapTrigger *pTonemapTrigger )
 {
 	m_hTriggerTonemapList.FindAndRemove( pTonemapTrigger );
+}
+
+void CASW_Inhabitable_NPC::DoImpactEffect( trace_t &tr, int nDamageType )
+{
+	// don't do impact effects, they're simulated clientside by the tracer usermessage
+}
+
+void CASW_Inhabitable_NPC::DoMuzzleFlash()
+{
+	// asw - muzzle flashes are triggered by tracer usermessages instead to save bandwidth
+}
+
+void CASW_Inhabitable_NPC::MakeTracer( const Vector &vecTracerSrc, const trace_t &tr, int iTracerType )
+{
+	const char *tracer = "ASWUTracer";
+	if ( GetActiveASWWeapon() )
+		tracer = GetActiveASWWeapon()->GetUTracerType();
+
+	CRecipientFilter filter;
+	filter.AddAllPlayers();
+	if ( gpGlobals->maxClients > 1 && IsInhabited() && GetCommander() )
+	{
+		filter.RemoveRecipient( GetCommander() );
+	}
+
+	UserMessageBegin( filter, tracer );
+	WRITE_SHORT( entindex() );
+	WRITE_FLOAT( tr.endpos.x );
+	WRITE_FLOAT( tr.endpos.y );
+	WRITE_FLOAT( tr.endpos.z );
+	WRITE_SHORT( m_iDamageAttributeEffects );
+	MessageEnd();
+}
+
+void CASW_Inhabitable_NPC::MakeUnattachedTracer( const Vector &vecTracerSrc, const trace_t &tr, int iTracerType )
+{
+	const char *tracer = "ASWUTracerUnattached";
+
+	CRecipientFilter filter;
+	filter.AddAllPlayers();
+	if ( gpGlobals->maxClients > 1 && IsInhabited() && GetCommander() )
+	{
+		filter.RemoveRecipient( GetCommander() );
+	}
+
+	UserMessageBegin( filter, tracer );
+	WRITE_SHORT( entindex() );
+	WRITE_FLOAT( tr.endpos.x );
+	WRITE_FLOAT( tr.endpos.y );
+	WRITE_FLOAT( tr.endpos.z );
+	WRITE_FLOAT( vecTracerSrc.x );
+	WRITE_FLOAT( vecTracerSrc.y );
+	WRITE_FLOAT( vecTracerSrc.z );
+	WRITE_SHORT( m_iDamageAttributeEffects );
+	MessageEnd();
 }
