@@ -181,15 +181,6 @@ DEFINE_FIELD( m_vecAltFireTarget, FIELD_VECTOR ),
 DEFINE_KEYFIELD( m_iTacticalVariant, FIELD_INTEGER, "tacticalvariant" ),
 DEFINE_KEYFIELD( m_iPathfindingVariant, FIELD_INTEGER, "pathfindingvariant" ),
 
-DEFINE_KEYFIELD( m_bFlammable, FIELD_BOOLEAN, "flammable" ),
-DEFINE_KEYFIELD( m_bTeslable, FIELD_BOOLEAN, "teslable" ),
-DEFINE_KEYFIELD( m_bFreezable, FIELD_BOOLEAN, "freezable" ),
-DEFINE_KEYFIELD( m_bFlinchable, FIELD_BOOLEAN, "flinchable" ),
-DEFINE_KEYFIELD( m_bGrenadeReflector, FIELD_BOOLEAN, "reflector" ),
-DEFINE_KEYFIELD( m_iHealthBonus, FIELD_INTEGER, "healthbonus" ),
-DEFINE_KEYFIELD( m_fSizeScale, FIELD_FLOAT, "sizescale" ),
-DEFINE_KEYFIELD( m_fSpeedScale, FIELD_FLOAT, "speedscale" ),
-
 END_DATADESC()
 
 
@@ -400,7 +391,7 @@ void CNPC_Combine::GatherConditions()
 			// occupy a vacant attack slot, they do so. This holds the slot until their
 			// schedule breaks and schedule selection runs again, essentially reserving this
 			// slot. If they do not select an attack schedule, then they'll release the slot.
-			if( OccupyStrategySlotRange( SQUAD_SLOT_ATTACK1, SQUAD_SLOT_ATTACK2 ) )
+			if( OccupyStrategySlotRange( SQUAD_SLOT_ATTACK1, GetMaxAttackSquadSlot() ) )
 			{
 				SetCondition( COND_COMBINE_ATTACK_SLOT_AVAILABLE );
 			}
@@ -595,6 +586,13 @@ bool CNPC_Combine::IsCurTaskContinuousMove()
 		return true;
 
 	return BaseClass::IsCurTaskContinuousMove();
+}
+
+bool CNPC_Combine::AIWantsToFire()
+{
+	const Task_t *pTask = GetTask();
+
+	return pTask && pTask->iTask == TASK_RANGE_ATTACK1;
 }
 
 
@@ -1493,12 +1491,12 @@ int CNPC_Combine::SelectCombatSchedule()
 			{
 				// I'm the leader, but I didn't get the job suppressing the enemy. We know this because
 				// This code only runs if the code above didn't assign me SCHED_COMBINE_SUPPRESS.
-				if ( HasCondition( COND_CAN_RANGE_ATTACK1 ) && OccupyStrategySlotRange( SQUAD_SLOT_ATTACK1, SQUAD_SLOT_ATTACK2 ) )
+				if ( HasCondition( COND_CAN_RANGE_ATTACK1 ) && OccupyStrategySlotRange( SQUAD_SLOT_ATTACK1, GetMaxAttackSquadSlot() ) )
 				{
 					return SCHED_RANGE_ATTACK1;
 				}
 
-				if( HasCondition(COND_WEAPON_HAS_LOS) && IsStrategySlotRangeOccupied( SQUAD_SLOT_ATTACK1, SQUAD_SLOT_ATTACK2 ) )
+				if( HasCondition(COND_WEAPON_HAS_LOS) && IsStrategySlotRangeOccupied( SQUAD_SLOT_ATTACK1, GetMaxAttackSquadSlot() ) )
 				{
 					// If everyone else is attacking and I have line of fire, wait for a chance to cover someone.
 					if( OccupyStrategySlot( SQUAD_SLOT_OVERWATCH ) )
@@ -1523,7 +1521,7 @@ int CNPC_Combine::SelectCombatSchedule()
 					}
 				}
 
-				if( !bFirstContact && OccupyStrategySlotRange( SQUAD_SLOT_ATTACK1, SQUAD_SLOT_ATTACK2 ) )
+				if( !bFirstContact && OccupyStrategySlotRange( SQUAD_SLOT_ATTACK1, GetMaxAttackSquadSlot() ) )
 				{
 					if( random->RandomInt(0, 100) < 60 )
 					{
@@ -1617,7 +1615,7 @@ int CNPC_Combine::SelectCombatSchedule()
 		Stand();
 		DesireStand();
 
-		if( GetEnemy() && !(GetEnemy()->GetFlags() & FL_NOTARGET) && OccupyStrategySlotRange( SQUAD_SLOT_ATTACK1, SQUAD_SLOT_ATTACK2 ) )
+		if( GetEnemy() && !(GetEnemy()->GetFlags() & FL_NOTARGET) && OccupyStrategySlotRange( SQUAD_SLOT_ATTACK1, GetMaxAttackSquadSlot() ) )
 		{
 			// Charge in and break the enemy's cover!
 			return SCHED_ESTABLISH_LINE_OF_FIRE;
@@ -1639,7 +1637,7 @@ int CNPC_Combine::SelectCombatSchedule()
 	// --------------------------------------------------------------
 	if ( HasCondition( COND_SEE_ENEMY ) && !HasCondition( COND_CAN_RANGE_ATTACK1 ) )
 	{
-		if ( (HasCondition( COND_TOO_FAR_TO_ATTACK ) || IsUsingTacticalVariant(TACTICAL_VARIANT_PRESSURE_ENEMY) ) && OccupyStrategySlotRange( SQUAD_SLOT_ATTACK1, SQUAD_SLOT_ATTACK2 ))
+		if ( (HasCondition( COND_TOO_FAR_TO_ATTACK ) || IsUsingTacticalVariant(TACTICAL_VARIANT_PRESSURE_ENEMY) ) && OccupyStrategySlotRange( SQUAD_SLOT_ATTACK1, GetMaxAttackSquadSlot() ))
 		{
 			return SCHED_COMBINE_PRESS_ATTACK;
 		}
@@ -1855,7 +1853,7 @@ int CNPC_Combine::SelectFailSchedule( int failedSchedule, int failedTask, AI_Tas
 {
 	if( failedSchedule == SCHED_COMBINE_TAKE_COVER1 )
 	{
-		if( IsInSquad() && IsStrategySlotRangeOccupied(SQUAD_SLOT_ATTACK1, SQUAD_SLOT_ATTACK2) && HasCondition(COND_SEE_ENEMY) )
+		if( IsInSquad() && IsStrategySlotRangeOccupied(SQUAD_SLOT_ATTACK1, GetMaxAttackSquadSlot()) && HasCondition(COND_SEE_ENEMY) )
 		{
 			// This eases the effects of an unfortunate bug that usually plagues shotgunners. Since their rate of fire is low,
 			// they spend relatively long periods of time without an attack squad slot. If you corner a shotgunner, usually 
@@ -1932,12 +1930,12 @@ int CNPC_Combine::SelectScheduleAttack()
 		{
 			if( HasCondition(COND_SEE_ENEMY) )
 			{
-				if ( OccupyStrategySlotRange( SQUAD_SLOT_ATTACK1, SQUAD_SLOT_ATTACK2 ) )
+				if ( OccupyStrategySlotRange( SQUAD_SLOT_ATTACK1, GetMaxAttackSquadSlot() ) )
 					return SCHED_RANGE_ATTACK1;
 			}
 			else
 			{
-				if ( OccupyStrategySlotRange( SQUAD_SLOT_ATTACK1, SQUAD_SLOT_ATTACK2 ) )
+				if ( OccupyStrategySlotRange( SQUAD_SLOT_ATTACK1, GetMaxAttackSquadSlot() ) )
 					return SCHED_COMBINE_PRESS_ATTACK;
 			}
 		}
@@ -1968,7 +1966,7 @@ int CNPC_Combine::SelectScheduleAttack()
 #endif
 
 		// Engage if allowed
-		if ( OccupyStrategySlotRange( SQUAD_SLOT_ATTACK1, SQUAD_SLOT_ATTACK2 ) )
+		if ( OccupyStrategySlotRange( SQUAD_SLOT_ATTACK1, GetMaxAttackSquadSlot() ) )
 		{
 			return SCHED_RANGE_ATTACK1;
 		}
@@ -2070,7 +2068,7 @@ int CNPC_Combine::TranslateSchedule( int scheduleType )
 		break;
 	case SCHED_COMBINE_TAKECOVER_FAILED:
 		{
-			if ( HasCondition( COND_CAN_RANGE_ATTACK1 ) && OccupyStrategySlotRange( SQUAD_SLOT_ATTACK1, SQUAD_SLOT_ATTACK2 ) )
+			if ( HasCondition( COND_CAN_RANGE_ATTACK1 ) && OccupyStrategySlotRange( SQUAD_SLOT_ATTACK1, GetMaxAttackSquadSlot() ) )
 			{
 				return TranslateSchedule( SCHED_RANGE_ATTACK1 );
 			}
@@ -2142,7 +2140,7 @@ int CNPC_Combine::TranslateSchedule( int scheduleType )
 
 			if( IsUsingTacticalVariant( TACTICAL_VARIANT_PRESSURE_ENEMY ) && !IsRunningBehavior() )
 			{
-				if( OccupyStrategySlotRange( SQUAD_SLOT_ATTACK1, SQUAD_SLOT_ATTACK2 ) )
+				if( OccupyStrategySlotRange( SQUAD_SLOT_ATTACK1, GetMaxAttackSquadSlot() ) )
 				{
 					return SCHED_COMBINE_PRESS_ATTACK;
 				}
@@ -2330,10 +2328,6 @@ void CNPC_Combine::HandleAnimEvent( animevent_t *pEvent )
 		{
 		case COMBINE_AE_AIM:	
 			{
-				if ( GetActiveWeapon() )
-				{
-					GetActiveWeapon()->Operator_ForceNPCFire( this, atoi( pEvent->options ) != 0 );
-				}
 				handledEvent = true;
 				break;
 			}
@@ -2809,7 +2803,7 @@ bool CNPC_Combine::CheckCanThrowGrenade( const Vector &vecTarget )
 	{
 		// Have to try a high toss. Do I have enough room?
 		trace_t tr;
-		AI_TraceLine( EyePosition(), EyePosition() + Vector( 0, 0, 64 ), MASK_SHOT, this, COLLISION_GROUP_NONE, &tr );
+		AI_TraceLine( EyePosition(), EyePosition() + Vector( 0, 0, 64 ), MASK_SHOT, this, ASW_COLLISION_GROUP_GRENADES, &tr );
 		if( tr.fraction != 1.0 )
 		{
 			return false;
@@ -3095,10 +3089,10 @@ bool CNPC_Combine::OnBeginMoveAndShoot()
 {
 	if ( BaseClass::OnBeginMoveAndShoot() )
 	{
-		if( HasStrategySlotRange( SQUAD_SLOT_ATTACK1, SQUAD_SLOT_ATTACK2 ) )
+		if( HasStrategySlotRange( SQUAD_SLOT_ATTACK1, GetMaxAttackSquadSlot() ) )
 			return true; // already have the slot I need
 
-		if( !HasStrategySlotRange( SQUAD_SLOT_GRENADE1, SQUAD_SLOT_ATTACK_OCCLUDER ) && OccupyStrategySlotRange( SQUAD_SLOT_ATTACK1, SQUAD_SLOT_ATTACK2 ) )
+		if( !HasStrategySlotRange( SQUAD_SLOT_GRENADE1, SQUAD_SLOT_ATTACK_OCCLUDER ) && OccupyStrategySlotRange( SQUAD_SLOT_ATTACK1, GetMaxAttackSquadSlot() ) )
 			return true;
 	}
 	return false;
@@ -3257,51 +3251,6 @@ bool CNPC_Combine::IsRunningApproachEnemySchedule()
 bool CNPC_Combine::ShouldPickADeathPose( void ) 
 { 
 	return !IsCrouching(); 
-}
-
-void CNPC_Combine::SetSpawner( CASW_Base_Spawner *pSpawner )
-{
-	m_hSpawner = pSpawner;
-}
-void CNPC_Combine::SetAlienOrders( AlienOrder_t Orders, Vector vecOrderSpot, CBaseEntity *pOrderObject )
-{
-	Assert( !"TODO" );
-}
-AlienOrder_t CNPC_Combine::GetAlienOrders()
-{
-	Assert( !"TODO" );
-	return AOT_None;
-}
-void CNPC_Combine::MoveAside()
-{
-	Assert( !"TODO" );
-}
-void CNPC_Combine::ASW_Ignite( float flFlameLifetime, float flSize, CBaseEntity *pAttacker, CBaseEntity *pDamagingWeapon )
-{
-	Assert( !"TODO" );
-}
-void CNPC_Combine::ElectroStun( float flStuntime )
-{
-	Assert( !"TODO" );
-}
-void CNPC_Combine::SetHealthByDifficultyLevel()
-{
-	extern ConVar sk_combine_s_health;
-	extern ConVar sk_combine_guard_health;
-	int iHealth = MAX( 1, ASWGameRules()->ModifyAlienHealthBySkillLevel( IsElite() ? sk_combine_guard_health.GetFloat() : sk_combine_s_health.GetFloat() ) );
-	extern ConVar asw_debug_alien_damage;
-	if ( asw_debug_alien_damage.GetBool() )
-		Msg( "Setting %s's initial health to %d\n", GetClassname(), iHealth + m_iHealthBonus );
-	SetHealth( iHealth + m_iHealthBonus );
-	SetMaxHealth( iHealth + m_iHealthBonus );
-}
-void CNPC_Combine::SetHoldoutAlien()
-{
-	m_bIsHoldout = true;
-}
-bool CNPC_Combine::IsHoldoutAlien()
-{
-	return m_bIsHoldout;
 }
 
 //-----------------------------------------------------------------------------

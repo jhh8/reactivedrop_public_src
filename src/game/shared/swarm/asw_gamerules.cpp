@@ -1221,8 +1221,14 @@ CAmmoDef *GetAmmoDef()
 	{
 		bInitted = true;
 
+		// HL2 based ammo types
 		def.AddAmmoType( "AR2", DMG_BULLET, TRACER_LINE_AND_WHIZ, "sk_plr_dmg_ar2", "sk_npc_dmg_ar2", "sk_max_ar2", BULLET_IMPULSE( 200, 1225 ), 0 );
 		def.AddAmmoType( "AR2G", DMG_DISSOLVE, TRACER_NONE, NULL, NULL, "sk_max_ar2_altfire", 0, 0 );
+		def.AddAmmoType( "StriderMinigun", DMG_BULLET, TRACER_LINE, 5, 5, 15, 1.0 * 750 * 12, AMMO_FORCE_DROP_IF_CARRIED ); // hit like a 1.0kg weight at 750 ft/s
+		def.AddAmmoType( "StriderMinigunDirect", DMG_BULLET, TRACER_LINE, 2, 2, 15, 1.0 * 750 * 12, AMMO_FORCE_DROP_IF_CARRIED ); // hit like a 1.0kg weight at 750 ft/s
+		def.AddAmmoType( "CombineCannon", DMG_BULLET, TRACER_LINE, 3, 40, 0, 1.5 * 750 * 12, 0 ); // hit like a 1.5kg weight at 750 ft/s
+		def.AddAmmoType( "HelicopterGun", DMG_BULLET, TRACER_LINE_AND_WHIZ, 3, 6, 225, BULLET_IMPULSE( 400, 1225 ), AMMO_FORCE_DROP_IF_CARRIED | AMMO_INTERPRET_PLRDAMAGE_AS_DAMAGE_TO_PLAYER );
+
 		// asw ammo
 		//				name				damagetype					tracertype				player dmg					npc damage					carry					physics force impulse		flags
 		// rifle  DMG_BULLET
@@ -6640,16 +6646,16 @@ void CAlienSwarm::FreezeAliensInRadius( CBaseEntity *pInflictor, float flFreezeA
 				}
 			}
 #endif
-			continue;
+			if ( !ASWDeathmatchMode() )
+				continue;
 		}
 
-		if ( !pEntity->IsAlienClassType() )
+		if ( !pEntity->IsInhabitableNPC() )
 			continue;
 
 		// Check that the explosion can 'see' this entity.
 		vecSpot = pEntity->BodyTarget( vecSrc, false );
 		UTIL_TraceLine( vecSrc, vecSpot, MASK_RADIUS_DAMAGE, pInflictor, COLLISION_GROUP_NONE, &tr );
-
 
 		if ( tr.fraction != 1.0 )
 		{
@@ -6712,7 +6718,7 @@ void CAlienSwarm::FreezeAliensInRadius( CBaseEntity *pInflictor, float flFreezeA
 			}
 		}
 #ifdef GAME_DLL
-		CASW_Alien* pAlien = assert_cast<CASW_Alien*>(pEntity);
+		CASW_Inhabitable_NPC *pAlien = assert_cast< CASW_Inhabitable_NPC * >( pEntity );
 		CBaseAnimating *pAnim = pAlien;
 		if ( pAnim->IsOnFire() )
 		{
@@ -7150,16 +7156,17 @@ void CAlienSwarm::OnSkillLevelChanged( int iNewLevel )
 	m_iSkillLevel = iNewLevel;
 }
 
-void CAlienSwarm::FindAndModifyAlienHealth(const char *szClass)
+void CAlienSwarm::FindAndModifyAlienHealth( const char *szClass )
 {
 	if ( !szClass || szClass[0] == 0 )
 		return;
 
-	CBaseEntity* pEntity = NULL;
-	while ((pEntity = gEntList.FindEntityByClassname( pEntity, szClass )) != NULL)
+	CBaseEntity *pEntity = NULL;
+	while ( ( pEntity = gEntList.FindEntityByClassname( pEntity, szClass ) ) != NULL )
 	{
-		IASW_Spawnable_NPC* pNPC = dynamic_cast<IASW_Spawnable_NPC*>(pEntity);			
-		if (pNPC)
+		IASW_Spawnable_NPC *pNPC = dynamic_cast< IASW_Spawnable_NPC * >( pEntity );
+		Assert( pNPC );
+		if ( pNPC )
 		{
 			pNPC->SetHealthByDifficultyLevel();
 		}

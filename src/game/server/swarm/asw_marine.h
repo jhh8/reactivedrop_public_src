@@ -90,7 +90,6 @@ public:
 	virtual void PrecacheSpeech();
 	
 	virtual void	Spawn( void );
-	virtual void	NPCInit();
 	virtual void	UpdateOnRemove();
 	void	SelectModelFromProfile();
 	void	SelectModel();
@@ -98,6 +97,8 @@ public:
 	CAI_Senses *CreateSenses();
 
 	void SetHeightLook( float flHeightLook );
+	int GetBaseHealth() { return 100; }
+	void SetHealthByDifficultyLevel() {}
 
 	// Thinking
 	virtual void Think(void);
@@ -169,7 +170,6 @@ public:
 	virtual bool ASWAnim_CanMove();
 	virtual float MaxSpeed();
 	void AvoidPhysicsProps( CUserCmd *pCmd );
-	void    PhysicsSimulate( void );		
 	virtual void InhabitedPhysicsSimulate();
 	virtual bool ShouldPlayerAvoid( void );
 	virtual float GetIdealSpeed() const;
@@ -186,8 +186,6 @@ public:
 	CNetworkVar( bool, m_bForceWalking );
 	CNetworkVector( m_vecGroundVelocity );
 	CNetworkVar( bool, m_bRolls );
-
-	CASW_Lag_Compensation m_LagCompensation;
 
 	// melee
 	void PhysicsShove();
@@ -562,9 +560,9 @@ public:
 	CNetworkVar( float, m_flPreventLaserSightTime );
 
 	// AI control of firing
-	bool AIWantsToFire();
-	bool AIWantsToFire2();
-	bool AIWantsToReload();
+	virtual bool AIWantsToFire();
+	virtual bool AIWantsToFire2();
+	virtual bool AIWantsToReload();
 	bool m_bWantsToFire, m_bWantsToFire2;
 	float m_fMarineAimError;
 	CNetworkVar(float, m_fAIPitch);	// pitch aim of the AI, so it can be shown by the clientside anims
@@ -721,7 +719,6 @@ public:
 	IMPLEMENT_NETWORK_VAR_FOR_DERIVED( m_hGroundEntity );
 	IMPLEMENT_NETWORK_VAR_FOR_DERIVED( m_iHealth );
 	IMPLEMENT_NETWORK_VAR_FOR_DERIVED( m_iMaxHealth );
-	IMPLEMENT_NETWORK_VAR_FOR_DERIVED( m_vecBaseVelocity );
 	IMPLEMENT_NETWORK_VAR_FOR_DERIVED( m_vecVelocity );
 	IMPLEMENT_NETWORK_VAR_FOR_DERIVED( m_fFlags );
 	IMPLEMENT_NETWORK_VAR_FOR_DERIVED( m_iAmmo );

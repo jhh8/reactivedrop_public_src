@@ -4,6 +4,8 @@
 #include "c_asw_weapon.h"
 #include "game_timescale_shared.h"
 #include "c_te_effect_dispatch.h"
+#include "c_asw_fx.h"
+#include "asw_util_shared.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -20,10 +22,14 @@ IMPLEMENT_CLIENTCLASS_DT( C_ASW_Inhabitable_NPC, DT_ASW_Inhabitable_NPC, CASW_In
 	RecvPropBool( RECVINFO( m_bWalking ) ),
 	RecvPropIntWithMinusOneFlag( RECVINFO( m_iControlsOverride ) ),
 	RecvPropInt( RECVINFO( m_iHealth ) ),
+	RecvPropVector( RECVINFO( m_vecBaseVelocity ) ),
+	RecvPropBool( RECVINFO( m_bElectroStunned ) ),
+	RecvPropBool( RECVINFO( m_bOnFire ) ),
 END_RECV_TABLE()
 
 BEGIN_PREDICTION_DATA( C_ASW_Inhabitable_NPC )
 	DEFINE_FIELD( m_nOldButtons, FIELD_INTEGER ),
+	DEFINE_PRED_FIELD_TOL( m_vecBaseVelocity, FIELD_VECTOR, FTYPEDESC_INSENDTABLE, 0.05 ),
 END_PREDICTION_DATA()
 
 C_ASW_Inhabitable_NPC::C_ASW_Inhabitable_NPC() :
@@ -41,10 +47,17 @@ C_ASW_Inhabitable_NPC::C_ASW_Inhabitable_NPC() :
 	m_pSurfaceData = NULL;
 	m_surfaceFriction = 1.0f;
 	m_chTextureType = m_chPreviousTextureType = 0;
+
+	m_bOnFire = false;
+	m_bElectroStunned = false;
+	m_fNextElectroStunEffect = 0;
+	m_pBurningEffect = NULL;
 }
 
 C_ASW_Inhabitable_NPC::~C_ASW_Inhabitable_NPC()
 {
+	m_bOnFire = false;
+	UpdateFireEmitters();
 }
 
 bool C_ASW_Inhabitable_NPC::IsInhabited()
@@ -69,6 +82,13 @@ const char *C_ASW_Inhabitable_NPC::GetPlayerName() const
 
 void C_ASW_Inhabitable_NPC::PostDataUpdate( DataUpdateType_t updateType )
 {
+	// If this entity was new, then latch in various values no matter what.
+	if ( updateType == DATA_UPDATE_CREATED )
+	{
+		// We want to think every frame.
+		SetNextClientThink( CLIENT_THINK_ALWAYS );
+	}
+
 	bool bPredict = ShouldPredict();
 	if ( bPredict )
 	{
@@ -107,8 +127,13 @@ void C_ASW_Inhabitable_NPC::PostDataUpdate( DataUpdateType_t updateType )
 		MDLCACHE_CRITICAL_SECTION();
 		ShutdownPredictable();
 	}
+}
 
-	SetNextClientThink( CLIENT_THINK_ALWAYS );
+void C_ASW_Inhabitable_NPC::UpdateOnRemove()
+{
+	BaseClass::UpdateOnRemove();
+	m_bOnFire = false;
+	UpdateFireEmitters();
 }
 
 bool C_ASW_Inhabitable_NPC::ShouldPredict()
@@ -147,6 +172,17 @@ void C_ASW_Inhabitable_NPC::ClientThink()
 	{
 		m_GlowObject.SetRenderFlags( false, false );
 	}
+
+	if ( GetHealth() > 0 && m_bElectroStunned && m_fNextElectroStunEffect <= gpGlobals->curtime )
+	{
+		// apply electro stun effect
+		HACK_GETLOCALPLAYER_GUARD( "C_ASW_Alien::ClientThink FX_ElectroStun" );
+		FX_ElectroStun( this );
+		m_fNextElectroStunEffect = gpGlobals->curtime + RandomFloat( 0.3, 1.0 );
+		//Msg( "%f - ElectroStunEffect\n", gpGlobals->curtime );
+	}
+
+	UpdateFireEmitters();
 }
 
 const Vector &C_ASW_Inhabitable_NPC::GetFacingPoint()
@@ -173,6 +209,15 @@ C_ASW_Weapon *C_ASW_Inhabitable_NPC::GetActiveASWWeapon( void ) const
 C_ASW_Weapon *C_ASW_Inhabitable_NPC::GetASWWeapon( int i ) const
 {
 	return assert_cast< C_ASW_Weapon * >( GetWeapon( i ) );
+}
+
+Vector C_ASW_Inhabitable_NPC::Weapon_ShootPosition()
+{
+	Vector right;
+	GetVectors( NULL, &right, NULL );
+
+	// TODO
+	return GetAbsOrigin() + Vector( 0, 0, 34 ) + 8 * right;
 }
 
 // when marine's health falls below this, name starts to blink red
@@ -262,4 +307,32 @@ void C_ASW_Inhabitable_NPC::MakeUnattachedTracer( const Vector &vecTracerSrc, co
 	data.m_vStart = vecTracerSrc;
 
 	DispatchEffect( tracer, data );
+}
+
+void C_ASW_Inhabitable_NPC::UpdateFireEmitters( void )
+{
+	bool bOnFire = ( m_bOnFire.Get() && !IsEffectActive( EF_NODRAW ) );
+	if ( bOnFire != m_bClientOnFire )
+	{
+		m_bClientOnFire = bOnFire;
+		if ( m_bClientOnFire )
+		{
+			if ( !m_pBurningEffect )
+			{
+				m_pBurningEffect = UTIL_ASW_CreateFireEffect( this );
+			}
+			EmitSound( "ASWFire.BurningFlesh" );
+		}
+		else
+		{
+			if ( m_pBurningEffect )
+			{
+				ParticleProp()->StopEmission( m_pBurningEffect );
+				m_pBurningEffect = NULL;
+			}
+			StopSound( "ASWFire.BurningFlesh" );
+			if ( C_BaseEntity::IsAbsQueriesValid() )
+				EmitSound( "ASWFire.StopBurning" );
+		}
+	}
 }
