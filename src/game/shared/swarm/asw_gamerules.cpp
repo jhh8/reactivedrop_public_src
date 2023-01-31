@@ -319,7 +319,10 @@ static void UpdateMatchmakingTagsCallback( IConVar *pConVar, const char *pOldVal
 		sv_tags.SetValue( buffer );
 	}
 #else
-	if ( !ASWGameRules() || !UTIL_RD_IsLobbyOwner() )
+	g_ReactiveDropWorkshop.CheckForRequiredAddons();
+
+	C_AlienSwarm *pAlienSwarm = ASWGameRules();
+	if ( !pAlienSwarm || !UTIL_RD_IsLobbyOwner() )
 	{
 		return;
 	}
@@ -338,7 +341,7 @@ static void UpdateMatchmakingTagsCallback( IConVar *pConVar, const char *pOldVal
 	SteamMatchmaking()->SetLobbyMemberLimit( UTIL_RD_GetCurrentLobbyID(), gpGlobals->maxClients );
 	UTIL_RD_UpdateCurrentLobbyData( "members:numSlots", gpGlobals->maxClients );
 
-	PublishedFileId_t missionAddonID = ASWGameRules()->m_iMissionWorkshopID.Get();
+	PublishedFileId_t missionAddonID = pAlienSwarm->m_iMissionWorkshopID.Get();
 	if ( missionAddonID == k_PublishedFileIdInvalid )
 	{
 		UTIL_RD_RemoveCurrentLobbyData( "game:missioninfo:workshop" );
@@ -361,12 +364,19 @@ static void UpdateMatchmakingTagsCallback( IConVar *pConVar, const char *pOldVal
 
 	UTIL_RD_UpdateCurrentLobbyData( "system:game_version", engine->GetProductVersionString() );
 	UTIL_RD_UpdateCurrentLobbyData( "system:map_version", GetClientWorldEntity()->m_nMapVersion );
-	if ( SteamApps() )
+	if ( ISteamApps *pSteamApps = SteamApps() )
 	{
-		UTIL_RD_UpdateCurrentLobbyData( "system:game_build", SteamApps()->GetAppBuildId() );
+		UTIL_RD_UpdateCurrentLobbyData( "system:game_build", pSteamApps->GetAppBuildId() );
 		char szBranch[256]{};
-		SteamApps()->GetCurrentBetaName( szBranch, sizeof( szBranch ) );
+		pSteamApps->GetCurrentBetaName( szBranch, sizeof( szBranch ) );
 		UTIL_RD_UpdateCurrentLobbyData( "system:game_branch", szBranch );
+
+		KeyValues::AutoDelete pUpdate( "update" );
+		pUpdate->SetString( "update/system/game_version", engine->GetProductVersionString() );
+		pUpdate->SetInt( "update/system/map_version", GetClientWorldEntity()->m_nMapVersion );
+		pUpdate->SetInt( "update/system/game_build", pSteamApps->GetAppBuildId() );
+		pUpdate->SetString( "update/system/game_branch", szBranch );
+		g_pMatchFramework->GetMatchSession()->UpdateSessionSettings( pUpdate );
 	}
 	else
 	{
@@ -374,9 +384,9 @@ static void UpdateMatchmakingTagsCallback( IConVar *pConVar, const char *pOldVal
 		UTIL_RD_RemoveCurrentLobbyData( "system:game_branch" );
 	}
 
-	if ( ASWDeathmatchMode() )
+	if ( C_ASW_Deathmatch_Mode *pDeathmatch = ASWDeathmatchMode() )
 	{
-		switch ( ASWDeathmatchMode()->GetGameMode() )
+		switch ( pDeathmatch->GetGameMode() )
 		{
 		case GAMEMODE_DEATHMATCH:
 			UTIL_RD_UpdateCurrentLobbyData( "game:deathmatch", "deathmatch" );
@@ -392,7 +402,7 @@ static void UpdateMatchmakingTagsCallback( IConVar *pConVar, const char *pOldVal
 			break;
 		default:
 			AssertOnce( !"Unhandled deathmatch mode" );
-			UTIL_RD_UpdateCurrentLobbyData( "game:deathmatch", CFmtStr( "unknown_%d", ASWDeathmatchMode()->GetGameMode() ) );
+			UTIL_RD_UpdateCurrentLobbyData( "game:deathmatch", CFmtStr( "unknown_%d", pDeathmatch->GetGameMode() ) );
 			break;
 		}
 	}
@@ -403,13 +413,7 @@ static void UpdateMatchmakingTagsCallback( IConVar *pConVar, const char *pOldVal
 
 	extern ConVar rd_challenge;
 
-	if ( ASWDeathmatchMode() )
-	{
-		UTIL_RD_RemoveCurrentLobbyData( "game:challenge" );
-		UTIL_RD_RemoveCurrentLobbyData( "game:challengeinfo:workshop" );
-		UTIL_RD_RemoveCurrentLobbyData( "game:challengeinfo:displaytitle" );
-	}
-	else if ( !V_strcmp( rd_challenge.GetString(), "0" ) )
+	if ( !V_strcmp( rd_challenge.GetString(), "0" ) )
 	{
 		UTIL_RD_UpdateCurrentLobbyData( "game:challenge", "0" );
 		UTIL_RD_RemoveCurrentLobbyData( "game:challengeinfo:workshop" );
@@ -429,8 +433,22 @@ static void UpdateMatchmakingTagsCallback( IConVar *pConVar, const char *pOldVal
 		}
 		UTIL_RD_UpdateCurrentLobbyData( "game:challengeinfo:displaytitle", ReactiveDropChallenges::DisplayName( rd_challenge.GetString() ) );
 	}
-	UTIL_RD_UpdateCurrentLobbyData( "game:onslaught", ASWGameRules()->IsOnslaught() ? "1" : "0" );
-	UTIL_RD_UpdateCurrentLobbyData( "game:hardcoreFF", ASWGameRules()->IsHardcoreFF() ? "1" : "0" );
+	UTIL_RD_UpdateCurrentLobbyData( "game:onslaught", pAlienSwarm->IsOnslaught() ? "1" : "0" );
+	UTIL_RD_UpdateCurrentLobbyData( "game:hardcoreFF", pAlienSwarm->IsHardcoreFF() ? "1" : "0" );
+
+	CUtlVector<PublishedFileId_t> RequiredAddons;
+	g_ReactiveDropWorkshop.GetRequiredAddons( RequiredAddons );
+
+	char szRequiredAddons[1024]{};
+	FOR_EACH_VEC( RequiredAddons, i )
+	{
+		if ( i )
+			V_snprintf( szRequiredAddons, sizeof( szRequiredAddons ), "%s,%llX", szRequiredAddons, RequiredAddons[i] );
+		else
+			V_snprintf( szRequiredAddons, sizeof( szRequiredAddons ), "%llX", RequiredAddons[i] );
+	}
+
+	UTIL_RD_UpdateCurrentLobbyData( "game:required_workshop_items", szRequiredAddons );
 #endif
 }
 
@@ -1401,7 +1419,8 @@ float CAlienSwarm::GetMarineDeathCamInterp( bool bIgnoreCvar )
 
 void CAlienSwarm::OnDataChanged( DataUpdateType_t updateType )
 {
-	if ( m_iPreviousGameState != GetGameState() )
+	bool bGameStateChanged = m_iPreviousGameState != GetGameState();
+	if ( bGameStateChanged )
 	{
 		m_iPreviousGameState = GetGameState();
 
@@ -1417,9 +1436,11 @@ void CAlienSwarm::OnDataChanged( DataUpdateType_t updateType )
 			g_ReactiveDropWorkshop.OnMissionStart();
 		}
 
+		g_ReactiveDropWorkshop.CheckForRequiredAddons();
+
 		g_RD_Rich_Presence.UpdatePresence();
 	}
-	if ( m_iPreviousMissionWorkshopID != m_iMissionWorkshopID || updateType == DATA_UPDATE_CREATED )
+	if ( bGameStateChanged || m_iPreviousMissionWorkshopID != m_iMissionWorkshopID || updateType == DATA_UPDATE_CREATED )
 	{
 		m_iPreviousMissionWorkshopID = m_iMissionWorkshopID;
 
@@ -4584,10 +4605,6 @@ void CAlienSwarm::MissionComplete( bool bSuccess )
 			gameeventmanager->FireEvent( event );
 		}
 	}
-	SetGameState( ASW_GS_DEBRIEF );
-
-	// Clear out any force ready state if we fail or succeed in the middle so that we always give a chance to award XP
-	SetForceReady( ASW_FR_NONE );
 
 	Assert( m_szCycleNextMap.Get()[0] == '\0' ); // shouldn't be initialized yet
 	if ( IsCampaignGame() == 0 )
@@ -4738,6 +4755,11 @@ void CAlienSwarm::MissionComplete( bool bSuccess )
 			}
 		}
 	}
+
+	SetGameState( ASW_GS_DEBRIEF );
+
+	// Clear out any force ready state if we fail or succeed in the middle so that we always give a chance to award XP
+	SetForceReady( ASW_FR_NONE );
 
 	bool bSinglePlayer = false;
 
@@ -6613,6 +6635,8 @@ void CAlienSwarm::FreezeAliensInRadius( CBaseEntity *pInflictor, float flFreezeA
 	float flHalfRadiusSqr = Square( flRadius / 2.0f );
 	//float flMarineHalfRadiusSqr = flHalfRadiusSqr * asw_marine_explosion_protection.GetFloat();
 
+	CASW_Marine *pInflictorMarine = CASW_Marine::AsMarine( pInflictor );
+
 	// iterate on all entities in the vicinity.
 	for ( CEntitySphereQuery sphere( vecSrc, flRadius ); (pEntity = sphere.GetCurrentEntity()) != NULL; sphere.NextEntity() )
 	{
@@ -6646,7 +6670,7 @@ void CAlienSwarm::FreezeAliensInRadius( CBaseEntity *pInflictor, float flFreezeA
 				}
 			}
 #endif
-			if ( !ASWDeathmatchMode() )
+			if ( !ASWDeathmatchMode() && ( !pInflictor || ( pInflictorMarine && pInflictorMarine->IRelationType( pEntity ) == D_LI ) ) )
 				continue;
 		}
 
@@ -6740,7 +6764,6 @@ void CAlienSwarm::FreezeAliensInRadius( CBaseEntity *pInflictor, float flFreezeA
 #endif
 	}
 #ifdef GAME_DLL
-	CASW_Marine *pInflictorMarine = CASW_Marine::AsMarine( pInflictor );
 	CASW_Marine_Resource *pMR = pInflictorMarine ? pInflictorMarine->GetMarineResource() : NULL;
 	if ( pMR && nFrozenStat )
 	{
@@ -9064,6 +9087,8 @@ void CAlienSwarm::LevelInitPostEntity()
 	if ( sv_cheats )
 	{
 		m_bCheated = sv_cheats->GetBool();
+		if ( !scriptmanager )
+			m_bCheated = true;
 		static bool s_bInstalledCheatsChangeCallback = false;
 		if ( !s_bInstalledCheatsChangeCallback )
 		{

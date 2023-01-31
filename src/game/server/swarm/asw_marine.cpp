@@ -94,6 +94,7 @@
 #define ASW_DEFAULT_MARINE_MODEL "models/swarm/marine/marine.mdl"
 
 extern ConVar asw_stats_verbose;
+extern ConVar asw_stun_grenade_time;
 ConVar rd_frags_limit( "rd_frags_limit", "20",  FCVAR_REPLICATED, "Number of frags a player must reach to win the round");
 ConVar rd_chatter_about_ff( "rd_chatter_about_ff", "1",  FCVAR_REPLICATED, "If 1 marines will shout about friendly fire done to them");
 ConVar rd_chatter_about_marine_death( "rd_chatter_about_marine_death", "1",  FCVAR_REPLICATED, "If 1 marines will shout Marine Down if marine dies");
@@ -448,6 +449,7 @@ extern ConVar rd_allow_revive;
 extern ConVar rd_revive_health;
 ConVar rd_marine_poison_recover_delay( "rd_marine_poison_recover_delay", "2", FCVAR_CHEAT, "time after being poisoned before suit antitoxin begins to act" );
 ConVar rd_marine_poison_recover_tick( "rd_marine_poison_recover_tick", "0.5", FCVAR_CHEAT, "time between hitpoints restored by antitoxin" );
+ConVar asw_leadership_resist_scale( "asw_leadership_resist_scale", "0.5", FCVAR_CHEAT, "Incoming damage scale for leadership bonus." );
 
 float CASW_Marine::s_fNextMadFiringChatter = 0;
 float CASW_Marine::s_fNextIdleChatterTime = 0;
@@ -950,6 +952,8 @@ void CASW_Marine::Precache()
 	PrecacheScriptSound( "ASW_Blink.Blink" );
 	PrecacheScriptSound( "ASW_Blink.Teleport" );
 	PrecacheScriptSound( "ASW_XP.LevelUp" );
+	PrecacheScriptSound( "ASW_Leadership.Accuracy" );
+	PrecacheScriptSound( "ASW_Leadership.Resist" );
 
 	PrecacheScriptSound( "ASW_Weapon.InvalidDestination" );
 	PrecacheParticleSystem( "smallsplat" );						// shot
@@ -965,6 +969,8 @@ void CASW_Marine::Precache()
 	PrecacheParticleSystem( "jj_ground_pound" );
 	PrecacheParticleSystem( "invalid_destination" );
 	PrecacheParticleSystem( "Blink" );
+	PrecacheParticleSystem( "leadership_proc_accuracy" );
+	PrecacheParticleSystem( "leadership_proc_resist" );
 }
 
 void CASW_Marine::PrecacheSpeech()
@@ -1439,25 +1445,23 @@ int CASW_Marine::OnTakeDamage_Alive( const CTakeDamageInfo &info )
 
 	// reduce damage thanks to leadership
 	// see if we pass the chance
-	float fChance = MarineSkills()->GetHighestSkillValueNearby(GetAbsOrigin(),
+	CASW_Marine *pLeader = MarineSkills()->CheckSkillChanceNearby( this, GetAbsOrigin(),
 		asw_leadership_radius.GetFloat(),
 		ASW_MARINE_SKILL_LEADERSHIP, ASW_MARINE_SUBSKILL_LEADERSHIP_DAMAGE_RESIST );
-	static int iLeadershipResCount = 0;
-	if (random->RandomFloat() < fChance)
+	if ( pLeader )
 	{
-		// TODO: leadership particle effect?
+		CBaseEntity *pHelpHelpImBeingSupressed = ( CBaseEntity * )te->GetSuppressHost();
+		te->SetSuppressHost( NULL );
 
-		float fNewDamage = newInfo.GetDamage() * 0.5f;
-		if (fNewDamage <= 0)
+		DispatchParticleEffectLink( "leadership_proc_resist", PATTACH_POINT_FOLLOW, pLeader, this, pLeader->LookupAttachment( "backpack" ) );
+		EmitSound( "ASW_Leadership.Resist" );
+
+		te->SetSuppressHost( pHelpHelpImBeingSupressed );
+
+		float fNewDamage = newInfo.GetDamage() * asw_leadership_resist_scale.GetFloat();
+		if ( fNewDamage <= 0 )
 			return 0;
-		newInfo.SetDamage(fNewDamage);
-		
-		iLeadershipResCount++;
-
-		if (asw_debug_marine_damage.GetBool())
-		{			
-			Msg("  Damage reduced by nearby leadership to %f (leadership resistance applied %d times so far)\n", fNewDamage, iLeadershipResCount);
-		}
+		newInfo.SetDamage( fNewDamage );
 	}
 
 	if ( pAttacker )
@@ -1486,13 +1490,13 @@ int CASW_Marine::OnTakeDamage_Alive( const CTakeDamageInfo &info )
 		ApplyPassiveArmorEffects( newInfo );
 
 		// reduce damage and shock alien if we have electrified armour on
-		if ( newInfo.GetDamageType() & DMG_SLASH )
+		if ( newInfo.GetDamageType() & ( DMG_SLASH | DMG_CLUB ) )
 		{
 			if ( IsElectrifiedArmorActive() )
 			{
-				if ( pAttacker->IsAlienClassType() )
+				if ( pAttacker->IsInhabitableNPC() )
 				{
-					CASW_Alien* pAlien = assert_cast<CASW_Alien*>(pAttacker);
+					CASW_Inhabitable_NPC *pAlien = assert_cast< CASW_Inhabitable_NPC * >( pAttacker );
 
 					const float flDamageReturn = 20.0f;
 					Vector vecToTarget = pAlien->WorldSpaceCenter() - WorldSpaceCenter();
@@ -1579,7 +1583,7 @@ int CASW_Marine::OnTakeDamage_Alive( const CTakeDamageInfo &info )
 
 	int iPreDamageHealth = GetHealth();
 	CASW_GameStats.Event_MarineTookDamage( this, newInfo );
-	int result = BaseClass::OnTakeDamage_Alive(newInfo);
+	int result = CAI_PlayerAlly::OnTakeDamage_Alive( newInfo ); // skip inhabitable NPC
 	int iDamageTaken = MAX( iPreDamageHealth, 0 ) - MAX( GetHealth(), 0 );
 
 	if (asw_debug_marine_damage.GetBool() && result > 0)
@@ -1688,6 +1692,12 @@ int CASW_Marine::OnTakeDamage_Alive( const CTakeDamageInfo &info )
 				WRITE_BOOL( false );
 			}
 			MessageEnd();
+		}
+		if ( ( ASWDeathmatchMode() || !bFriendlyFire ) && ( info.GetDamageType() & DMG_SHOCK ) && m_bTeslable )
+		{
+			ElectroStun( asw_stun_grenade_time.GetFloat() );
+
+			m_fNoDamageDecal = true;
 		}
 		if (info.GetDamageType() & DMG_BLURPOISON)
 		{
@@ -2066,8 +2076,29 @@ void CASW_Marine::PostThink()
 	{
 		StudioFrameAdvance();
 	}
-		
+
 	ASWThinkEffects();
+
+
+	// stop electro stunning if we're slowed
+	if ( m_bElectroStunned && m_lifeState != LIFE_DYING )
+	{
+		if ( m_flElectroStunSlowMoveTime < gpGlobals->curtime )
+		{
+			m_bElectroStunned = false;
+		}
+		else
+		{
+			if ( gpGlobals->curtime >= m_fNextStunSound )
+			{
+				m_fNextStunSound = gpGlobals->curtime + RandomFloat( 0.2f, 0.5f );
+
+				EmitSound( "ASW_Tesla_Laser.Damage" );
+			}
+		}
+	}
+
+	UpdateThawRate();
 
 	if ( NeedToUpdateSquad() )
 	{
