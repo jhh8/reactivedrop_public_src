@@ -80,6 +80,7 @@ ConVar sk_hunter_health( "sk_hunter_health", "210", FCVAR_CHEAT );
 // Melee attacks
 ConVar sk_hunter_dmg_one_slash( "sk_hunter_dmg_one_slash", "20", FCVAR_CHEAT );
 ConVar sk_hunter_dmg_charge( "sk_hunter_dmg_charge", "20", FCVAR_CHEAT );
+ConVar sk_hunter_dmg_charge_npc( "sk_hunter_dmg_charge_npc", "250", FCVAR_CHEAT );
 
 // Flechette volley attack
 ConVar hunter_flechette_max_range( "hunter_flechette_max_range", "1200", FCVAR_CHEAT );
@@ -315,64 +316,6 @@ static int s_nFlechetteFuseAttach = -1;
 
 #define FLECHETTE_AIR_VELOCITY	2500
 
-class CHunterFlechette : public CPhysicsProp, public IParentPropInteraction
-{
-	DECLARE_CLASS( CHunterFlechette, CPhysicsProp );
-
-public:
-
-	CHunterFlechette();
-	~CHunterFlechette();
-
-	Class_T Classify() { return CLASS_NONE; }
-	
-	bool WasThrownBack()
-	{
-		return m_bThrownBack;
-	}
-
-public:
-
-	void Spawn();
-	void Activate();
-	void Precache();
-	void Shoot( Vector &vecVelocity, bool bBright );
-	void SetSeekTarget( CBaseEntity *pTargetEntity );
-	void Explode();
-
-	bool CreateVPhysics();
-
-	unsigned int PhysicsSolidMaskForEntity() const;
-	static CHunterFlechette *FlechetteCreate( const Vector &vecOrigin, const QAngle &angAngles, CBaseEntity *pentOwner = NULL );
-
-	// IParentPropInteraction
-	void OnParentCollisionInteraction( parentCollisionInteraction_t eType, int index, gamevcollisionevent_t *pEvent );
-	void OnParentPhysGunDrop( CBasePlayer *pPhysGunUser, PhysGunDrop_t Reason );
-
-protected:
-
-	void SetupGlobalModelData();
-
-	void StickTo( CBaseEntity *pOther, trace_t &tr );
-
-	void BubbleThink();
-	void DangerSoundThink();
-	void ExplodeThink();
-	void DopplerThink();
-	void SeekThink();
-
-	bool CreateSprites( bool bBright );
-
-	void FlechetteTouch( CBaseEntity *pOther );
-
-	Vector m_vecShootPosition;
-	EHANDLE m_hSeekTarget;
-	bool m_bThrownBack;
-
-	DECLARE_DATADESC();
-	//DECLARE_SERVERCLASS();
-};
-
 LINK_ENTITY_TO_CLASS( hunter_flechette, CHunterFlechette );
 
 BEGIN_DATADESC( CHunterFlechette )
@@ -397,7 +340,7 @@ END_DATADESC()
 
 //-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
-CHunterFlechette *CHunterFlechette::FlechetteCreate( const Vector &vecOrigin, const QAngle &angAngles, CBaseEntity *pentOwner )
+CHunterFlechette *CHunterFlechette::FlechetteCreate( float flDamageScale, const Vector &vecOrigin, const QAngle &angAngles, CBaseEntity *pentOwner )
 {
 	// Create a new entity with CHunterFlechette private data
 	CHunterFlechette *pFlechette = (CHunterFlechette *)CreateEntityByName( "hunter_flechette" );
@@ -406,8 +349,15 @@ CHunterFlechette *CHunterFlechette::FlechetteCreate( const Vector &vecOrigin, co
 	pFlechette->Spawn();
 	pFlechette->Activate();
 	pFlechette->SetOwnerEntity( pentOwner );
+	pFlechette->m_flDamageScale = flDamageScale;
 
 	return pFlechette;
+}
+
+void CHunterFlechette::SetupMarineFlechette( CBaseEntity *pWeapon )
+{
+	m_bThrownBack = true;
+	m_hCreatorWeapon = pWeapon;
 }
 
 
@@ -423,7 +373,7 @@ void CC_Hunter_Shoot_Flechette( const CCommand& args )
 	CBasePlayer *pPlayer = UTIL_GetCommandClient();
 
 	QAngle angEye = pPlayer->EyeAngles();
-	CHunterFlechette *entity = CHunterFlechette::FlechetteCreate( pPlayer->EyePosition(), angEye, pPlayer );
+	CHunterFlechette *entity = CHunterFlechette::FlechetteCreate( 1.0f, pPlayer->EyePosition(), angEye, pPlayer );
 	if ( entity )
 	{
 		entity->Precache();
@@ -687,7 +637,7 @@ void CHunterFlechette::FlechetteTouch( CBaseEntity *pOther )
 		ClearMultiDamage();
 		VectorNormalize( vecNormalizedVel );
 
-		float flDamage = sk_hunter_dmg_flechette.GetFloat();
+		float flDamage = m_flDamageScale * sk_hunter_dmg_flechette.GetFloat();
 		CBreakable *pBreak = dynamic_cast <CBreakable *>(pOther);
 		if ( pBreak && ( pBreak->GetMaterialType() == matGlass ) )
 		{
@@ -695,6 +645,7 @@ void CHunterFlechette::FlechetteTouch( CBaseEntity *pOther )
 		}
 
 		CTakeDamageInfo	dmgInfo( this, GetOwnerEntity(), flDamage, DMG_DISSOLVE | DMG_NEVERGIB );
+		dmgInfo.SetWeapon( m_hCreatorWeapon );
 		CalculateMeleeDamageForce( &dmgInfo, vecNormalizedVel, tr.endpos, 0.7f );
 		dmgInfo.SetDamagePosition( tr.endpos );
 		pOther->DispatchTraceAttack( dmgInfo, vecNormalizedVel, &tr );
@@ -923,9 +874,11 @@ void CHunterFlechette::Explode()
 		nDamageType |= DMG_PREVENT_PHYSICS_FORCE;
 	}
 
-	RadiusDamage( CTakeDamageInfo( this, GetOwnerEntity(), sk_hunter_flechette_explode_dmg.GetFloat(), nDamageType ), GetAbsOrigin(), sk_hunter_flechette_explode_radius.GetFloat(), CLASS_NONE, NULL );
-		
-    AddEffects( EF_NODRAW );
+	CTakeDamageInfo info( this, GetOwnerEntity(), m_flDamageScale * sk_hunter_flechette_explode_dmg.GetFloat(), nDamageType);
+	info.SetWeapon( m_hCreatorWeapon );
+	RadiusDamage( info, GetAbsOrigin(), sk_hunter_flechette_explode_radius.GetFloat(), CLASS_NONE, NULL );
+
+	AddEffects( EF_NODRAW );
 
 	SetThink( &CBaseEntity::SUB_Remove );
 	SetNextThink( gpGlobals->curtime + 0.1f );
@@ -4057,9 +4010,10 @@ void CNPC_Hunter::ChargeDamage( CBaseEntity *pTarget )
 		color32 red = {128,0,0,128};
 		UTIL_ScreenFade( pPlayer, red, 1.0f, 0.1f, FFADE_IN );
 	}
-	
-	// Player takes less damage
-	float flDamage = ( pPlayer == NULL ) ? 250 : sk_hunter_dmg_charge.GetFloat();
+
+	float flDamage = pTarget->Classify() == CLASS_ASW_MARINE ? sk_hunter_dmg_charge.GetFloat() : sk_hunter_dmg_charge_npc.GetFloat();
+	if ( ASWGameRules() )
+		flDamage = ASWGameRules()->ModifyAlienDamageBySkillLevel( flDamage );
 	
 	// If it's being held by the player, break that bond
 	Pickup_ForcePlayerToDropThisObject( pTarget );
@@ -4307,7 +4261,10 @@ void CNPC_Hunter::HandleAnimEvent( animevent_t *pEvent )
 		dir = right + forward;
 		QAngle angle( 25, 30, -20 );
 
-		MeleeAttack( HUNTER_MELEE_REACH, sk_hunter_dmg_one_slash.GetFloat(), angle, dir, HUNTER_BLOOD_LEFT_FOOT );
+		float flDamage = sk_hunter_dmg_one_slash.GetFloat();
+		if ( ASWGameRules() )
+			flDamage = ASWGameRules()->ModifyAlienDamageBySkillLevel( flDamage );
+		MeleeAttack( HUNTER_MELEE_REACH, flDamage, angle, dir, HUNTER_BLOOD_LEFT_FOOT );
 		return;
 	}
 
@@ -4322,7 +4279,10 @@ void CNPC_Hunter::HandleAnimEvent( animevent_t *pEvent )
 		
 		QAngle angle( 25, -30, 20 );
 
-		MeleeAttack( HUNTER_MELEE_REACH, sk_hunter_dmg_one_slash.GetFloat(), angle, dir, HUNTER_BLOOD_LEFT_FOOT );
+		float flDamage = sk_hunter_dmg_one_slash.GetFloat();
+		if ( ASWGameRules() )
+			flDamage = ASWGameRules()->ModifyAlienDamageBySkillLevel( flDamage );
+		MeleeAttack( HUNTER_MELEE_REACH, flDamage, angle, dir, HUNTER_BLOOD_LEFT_FOOT );
 		return;
 	}
 
@@ -6265,7 +6225,7 @@ bool CNPC_Hunter::ShootFlechette( CBaseEntity *pTargetEntity, bool bSingleShot )
 	QAngle angShoot;
 	VectorAngles( vecShoot, angShoot );
 
-	CHunterFlechette *pFlechette = CHunterFlechette::FlechetteCreate( vecSrc, angShoot, this );
+	CHunterFlechette *pFlechette = CHunterFlechette::FlechetteCreate( ASWGameRules() ? ASWGameRules()->ModifyAlienDamageBySkillLevel( 1.0f ) : 1.0f, vecSrc, angShoot, this );
 
 	pFlechette->AddEffects( EF_NOSHADOW );
 

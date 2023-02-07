@@ -565,6 +565,7 @@ ConVar rd_points_decay_tick( "rd_points_decay_tick", "0.01", FCVAR_REPLICATED, "
 
 #ifdef CLIENT_DLL
 ConVar rd_skip_all_dialogue( "rd_skip_all_dialogue", "0", FCVAR_ARCHIVE | FCVAR_USERINFO, "Tell the server not to send audio from asw_voiceover_dialogue." );
+ConVar rd_write_config_on_mission_start( "rd_write_config_on_mission_start", "1", FCVAR_ARCHIVE, "Update config.cfg when entering the in-game mission state. Useful for saving loadouts." );
 #endif
 
 // ASW Weapons
@@ -1433,6 +1434,10 @@ void CAlienSwarm::OnDataChanged( DataUpdateType_t updateType )
 
 		if ( GetGameState() == ASW_GS_INGAME )
 		{
+			if ( rd_write_config_on_mission_start.GetBool() )
+			{
+				engine->ClientCmd_Unrestricted( "host_writeconfig" );
+			}
 			g_ReactiveDropWorkshop.OnMissionStart();
 		}
 
@@ -4571,9 +4576,6 @@ static void ClearHouse()
 	DeleteAllEntities("asw_grub_sac");
 	DeleteAllEntities("asw_spawner");
 	DeleteAllEntities("asw_egg");
-	DeleteAllEntities("asw_drone_uber");
-	DeleteAllEntities("npc_antlionguard_normal");
-	DeleteAllEntities("npc_antlionguard_cavern");
 }
 
 void CAlienSwarm::MissionComplete( bool bSuccess )
@@ -4948,6 +4950,10 @@ void CAlienSwarm::MissionComplete( bool bSuccess )
 			m_hDebriefStats->m_iHealAmpGunAmps.Set( i, pMR->m_iHealAmpGunAmps );
 			m_hDebriefStats->m_iMedRifleHeals.Set( i, pMR->m_iMedRifleHeals );
 			m_hDebriefStats->m_iBiomassIgnited.Set( i, pMR->m_iBiomassIgnited );
+			m_hDebriefStats->m_iLeadershipProcsAccuracy.Set( i, pMR->m_iLeadershipProcsAccuracy );
+			m_hDebriefStats->m_iLeadershipProcsResist.Set( i, pMR->m_iLeadershipProcsResist );
+			m_hDebriefStats->m_iLeadershipDamageAccuracy.Set( i, pMR->m_iLeadershipDamageAccuracy );
+			m_hDebriefStats->m_iLeadershipDamageResist.Set( i, pMR->m_iLeadershipDamageResist );
 
 			// Set starting equips for the marine
 			m_hDebriefStats->m_iStartingEquip0.Set( i, pMR->m_iInitialWeaponsInSlots[0] );
@@ -6662,7 +6668,6 @@ void CAlienSwarm::FreezeAliensInRadius( CBaseEntity *pInflictor, float flFreezeA
 				}			
 				pAnim->Extinguish();
 
-				CASW_Marine *pInflictorMarine = CASW_Marine::AsMarine( pInflictor );
 				CASW_Marine_Resource *pMR = pInflictorMarine ? pInflictorMarine->GetMarineResource() : NULL;
 				if ( pMR )
 				{

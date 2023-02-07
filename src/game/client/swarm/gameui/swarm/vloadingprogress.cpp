@@ -26,8 +26,8 @@ using namespace vgui;
 using namespace BaseModUI;
 
 ConVar rd_show_leaderboard_loading( "rd_show_leaderboard_loading", "1", FCVAR_ARCHIVE, "show friends' leaderboard entries on the loading screen" );
-ConVar rd_show_mission_icon_loading( "rd_show_mission_icon_loading", "0", FCVAR_ARCHIVE, "show mission icon on the loading screen" );
-ConVar rd_leaderboard_by_difficulty( "rd_leaderboard_by_difficulty", "1", FCVAR_NONE, "Only show the leaderboard by current difficulty level, rather than all difficulties mixed together" );
+ConVar rd_show_mission_icon_loading( "rd_show_mission_icon_loading", "1", FCVAR_ARCHIVE, "show mission icon on the loading screen" );
+ConVar rd_auto_hide_mission_icon_loading( "rd_auto_hide_mission_icon_loading", "1", FCVAR_ARCHIVE, "hide the mission icon if the mission has a custom loading background" );
 ConVar rd_loading_image_per_map( "rd_loading_image_per_map", "1", FCVAR_ARCHIVE, "If set to 1 each map can have its own background image during loading screen, 0 means same image for every map" );
 ConVar rd_loading_status_text_visible( "rd_loading_status_text_visible", "1", FCVAR_ARCHIVE, "If set to 1 status text is visible on the loading screen." );
 
@@ -277,6 +277,9 @@ void LoadingProgress::PaintBackground()
 	int screenWide, screenTall;
 	surface()->GetScreenSize( screenWide, screenTall );
 
+	surface()->DrawSetColor( m_PosterReflectionColor );
+	surface()->DrawFilledRect( 0, 0, screenWide, screenTall );
+
 	if ( m_bDrawBackground && m_pBGImage )
 	{
 		int x, y, wide, tall;
@@ -290,9 +293,27 @@ void LoadingProgress::PaintBackground()
 	{
 		if ( m_bFullscreenPoster )
 		{
+			int x0 = 0, x1 = screenWide, y0 = 0, y1 = screenTall;
+
+			float aspectRatio = ( float )screenWide / ( float )screenTall;
+			if ( aspectRatio >= 16.0f / 9.0f )
+			{
+				// pillarbox the loading screen
+				int posterWide = screenTall * 16 / 9;
+				x0 = ( screenWide - posterWide ) / 2;
+				x1 -= x0;
+			}
+			else
+			{
+				// letterbox the loading screen
+				int posterTall = screenWide * 9 / 16;
+				y0 = ( screenTall - posterTall ) / 2;
+				y1 -= y0;
+			}
+
 			surface()->DrawSetColor( Color( 255, 255, 255, 255 ) );
 			surface()->DrawSetTexture( m_pPoster->GetImage()->GetID() );
-			surface()->DrawTexturedRect( 0, 0, screenWide, screenTall );
+			surface()->DrawTexturedRect( x0, y0, x1, y1 );
 		}
 		else
 		{
@@ -556,14 +577,7 @@ void LoadingProgress::SetLeaderboardData( const char *pszLevelName, PublishedFil
 
 	int iSkillLevel = ASWGameRules() ? ASWGameRules()->GetSkillLevel() : asw_skill.GetInt();
 	char szLeaderboardName[k_cchLeaderboardNameMax]{};
-	if ( rd_leaderboard_by_difficulty.GetBool() && iSkillLevel > 2 )
-	{
-		g_ASW_Steamstats.DifficultySpeedRunLeaderboardName( szLeaderboardName, sizeof( szLeaderboardName ), iSkillLevel, pszLevelName, nLevelAddon, pszChallengeName, nChallengeAddon );
-	}
-	if ( !szLeaderboardName[0] || !g_ASW_Steamstats.IsLBWhitelisted( szLeaderboardName ) )
-	{
-		g_ASW_Steamstats.SpeedRunLeaderboardName( szLeaderboardName, sizeof( szLeaderboardName ), pszLevelName, nLevelAddon, pszChallengeName, nChallengeAddon );
-	}
+	g_ASW_Steamstats.SpeedRunLeaderboardName( szLeaderboardName, sizeof( szLeaderboardName ), pszLevelName, nLevelAddon, pszChallengeName, nChallengeAddon );
 	if ( !g_ASW_Steamstats.IsLBWhitelisted( szLeaderboardName ) )
 	{
 		g_ASW_Steamstats.SpeedRunLeaderboardName( szLeaderboardName, sizeof( szLeaderboardName ), pszLevelName, nLevelAddon, "0", k_PublishedFileIdInvalid );
@@ -676,26 +690,15 @@ bool LoadingProgress::ShouldShowPosterForLevel( KeyValues *pMissionInfo, KeyValu
 //=============================================================================
 void LoadingProgress::SetupPoster( void )
 {
-	int i;
+	bool bUsingCustomBackground = false;
+
+	m_PosterReflectionColor = Color( 0, 0, 0, 255 );
 	
 	vgui::ImagePanel *pPoster = dynamic_cast< vgui::ImagePanel* >( FindChildByName( "Poster" ) );
 	if ( pPoster )
 	{ 
 		int screenWide, screenTall;
 		surface()->GetScreenSize( screenWide, screenTall );
-		float aspectRatio = ( float )screenWide / ( float )screenTall;
-		if ( aspectRatio >= 16.0f / 9.0f )
-		{
-			// pillarbox the loading screen
-			int posterWide = screenTall * 16 / 9;
-			pPoster->SetBounds( ( screenWide - posterWide ) / 2, 0, posterWide, screenTall );
-		}
-		else
-		{
-			// letterbox the loading screen
-			int posterTall = screenWide * 9 / 16;
-			pPoster->SetBounds( 0, ( screenTall - posterTall ) / 2, screenWide, posterTall );
-		}
 
 		const char *pszPosterImage = "swarm/loading/RD_BGFX04_wide";
 		if ( rd_loading_image_per_map.GetInt() == 1 && m_szLevelName[0] != 0 )
@@ -703,14 +706,31 @@ void LoadingProgress::SetupPoster( void )
 			CFmtStr szMapLoadingImageVmt( "materials/vgui/swarm/loading/%s_wide.vmt", m_szLevelName );
 			CFmtStr szMapLoadingImage( "swarm/loading/%s_wide", m_szLevelName );
 
+			IMaterial *pMaterial;
 			if ( m_bFullscreenPoster && filesystem->FileExists( szMapLoadingImageVmt ) )
 			{
 				pPoster->SetImage( szMapLoadingImage );
+				pMaterial = materials->FindMaterial( CFmtStr( "vgui/%s", szMapLoadingImage.Access() ), TEXTURE_GROUP_VGUI );
+				bUsingCustomBackground = true;
 			}
 			else
 			{
 				pPoster->SetImage( pszPosterImage );
+				pMaterial = materials->FindMaterial( CFmtStr( "vgui/%s", pszPosterImage ), TEXTURE_GROUP_VGUI );
 			}
+
+			Vector vecColor{ 0, 0, 0 };
+			if ( !IsErrorMaterial( pMaterial ) )
+			{
+				pMaterial->GetReflectivity( vecColor );
+			}
+
+			m_PosterReflectionColor = Color(
+				clamp( vecColor.x * 255, 0, 255 ),
+				clamp( vecColor.y * 255, 0, 255 ),
+				clamp( vecColor.z * 255, 0, 255 ),
+				255
+			);
 		}
 		else
 		{
@@ -722,7 +742,7 @@ void LoadingProgress::SetupPoster( void )
 	if ( m_pChapterInfo && m_pChapterInfo->GetString( "image", NULL ) )
 	{
 		m_pMissionPic->SetImage( m_pChapterInfo->GetString( "image" ) );
-		m_pMissionPic->SetVisible( rd_show_mission_icon_loading.GetBool() );
+		m_pMissionPic->SetVisible( rd_show_mission_icon_loading.GetBool() && ( !rd_auto_hide_mission_icon_loading.GetBool() || !bUsingCustomBackground ) );
 	}
 
 	bool bIsLocalized = false;

@@ -146,7 +146,6 @@ public:
 	void PrepStatsForSend_Leaderboard( CASW_Player *pPlayer, bool bUnofficial );
 
 	void SpeedRunLeaderboardName( char *szBuf, size_t bufSize, const char *szMap, PublishedFileId_t nMapID = 0, const char *szChallenge = "0", PublishedFileId_t nChallengeID = 0, ELeaderboardSortMethod *pESortMethod = NULL, ELeaderboardDisplayType *pEDisplayType = NULL );
-	void DifficultySpeedRunLeaderboardName( char *szBuf, size_t bufSize, int iSkill, const char *szMap, PublishedFileId_t nMapID = 0, const char *szChallenge = "0", PublishedFileId_t nChallengeID = 0 );
 
 	void ReadDownloadedLeaderboard( CUtlVector<RD_LeaderboardEntry_t> & entries, SteamLeaderboardEntries_t hEntries, int nCount );
 	void ReadDownloadedLeaderboard( CUtlVector<RD_LeaderboardEntry_Points_t> & entries, SteamLeaderboardEntries_t hEntries, int nCount );
@@ -191,6 +190,10 @@ private:
 	int32	m_iHealAmpGunHeals;
 	int32	m_iHealAmpGunAmps;
 	int32	m_iMedRifleHeals;
+	int32	m_iLeadershipProcsAccuracy;
+	int32	m_iLeadershipProcsResist;
+	int32	m_iLeadershipDamageAccuracy;
+	int32	m_iLeadershipDamageResist;
 	int32	m_iTotalPlayTime;
 	
 	typedef CUtlVector<int32> StatList_Int_t;
@@ -200,6 +203,7 @@ private:
 	StatList_Int_t m_SecondaryEquipCounts;
 	StatList_Int_t m_ExtraEquipCounts;
 	StatList_Int_t m_MarineSelectionCounts;
+	StatList_Int_t m_MissionPlayerCounts;
 	StatList_Int_t m_DifficultyCounts;
 
 	DifficultyStats_t m_DifficultyStats[5];
@@ -218,12 +222,8 @@ private:
 
 	CCallResult<CASW_Steamstats, LeaderboardFindResult_t> m_LeaderboardFindResultCallback;
 	void LeaderboardFindResultCallback( LeaderboardFindResult_t *pResult, bool bIOFailure );
-	CCallResult<CASW_Steamstats, LeaderboardFindResult_t> m_LeaderboardDifficultyFindResultCallback;
-	void LeaderboardDifficultyFindResultCallback( LeaderboardFindResult_t *pResult, bool bIOFailure );
 	CCallResult<CASW_Steamstats, LeaderboardScoreUploaded_t> m_LeaderboardScoreUploadedCallback;
 	void LeaderboardScoreUploadedCallback( LeaderboardScoreUploaded_t *pResult, bool bIOFailure );
-	CCallResult<CASW_Steamstats, LeaderboardScoreUploaded_t> m_LeaderboardDifficultyScoreUploadedCallback;
-	void LeaderboardDifficultyScoreUploadedCallback( LeaderboardScoreUploaded_t *pResult, bool bIOFailure );
 
 	int32 m_iLeaderboardScore;
 	LeaderboardScoreDetails_v2_t m_LeaderboardScoreDetails;

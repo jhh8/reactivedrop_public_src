@@ -175,6 +175,10 @@ CASW_Marine_Resource::CASW_Marine_Resource()
 	m_iHealAmpGunAmps = 0;
 	m_iMedRifleHeals = 0;
 	m_iBiomassIgnited = 0;
+	m_iLeadershipProcsAccuracy = 0;
+	m_iLeadershipProcsResist = 0;
+	m_iLeadershipDamageAccuracy = 0;
+	m_iLeadershipDamageResist = 0;
 	m_iScore = -1;
 	m_flFinishedMissionTime = -1;
 
@@ -389,15 +393,13 @@ bool CASW_Marine_Resource::IsFiring()
 }
 
 // a game event has happened that is potentially affected by leadership or other damage scaling
-float CASW_Marine_Resource::OnFired_GetDamageScale()
+void CASW_Marine_Resource::OnFired_ScaleDamage( FireBulletsInfo_t & info )
 {
-	float flDamageScale = 1.0f;
-
 	// damage amp causes double damage always
 	CASW_Marine *pMarine = GetMarineEntity();
 	if ( pMarine && pMarine->GetDamageBuffEndTime() > gpGlobals->curtime )
 	{
-		flDamageScale *= rd_damage_buff_scale.GetFloat();// 2.0f;
+		info.m_flDamage *= rd_damage_buff_scale.GetFloat();
 	}
 
 	if ( pMarine )
@@ -407,6 +409,18 @@ float CASW_Marine_Resource::OnFired_GetDamageScale()
 			ASW_MARINE_SKILL_LEADERSHIP, ASW_MARINE_SUBSKILL_LEADERSHIP_ACCURACY_CHANCE );
 		if ( pLeader )
 		{
+			float flNewDamage = info.m_flDamage * asw_leadership_accuracy_scale.GetFloat();
+
+			CASW_Marine_Resource *pLeaderMR = pLeader->GetMarineResource();
+			Assert( pLeaderMR );
+			if ( pLeaderMR )
+			{
+				pLeaderMR->m_iLeadershipProcsAccuracy++;
+				pLeaderMR->m_iLeadershipDamageAccuracy += flNewDamage - info.m_flDamage;
+			}
+
+			info.m_flDamage = flNewDamage;
+
 			CBaseEntity *pHelpHelpImBeingSupressed = ( CBaseEntity * )te->GetSuppressHost();
 			te->SetSuppressHost( NULL );
 
@@ -415,12 +429,8 @@ float CASW_Marine_Resource::OnFired_GetDamageScale()
 			EmitSound( "ASW_Leadership.Accuracy" );
 
 			te->SetSuppressHost( pHelpHelpImBeingSupressed );
-
-			flDamageScale *= asw_leadership_accuracy_scale.GetFloat();
 		}
 	}
-
-	return flDamageScale;
 }
 
 // marine has just used the weapon specified - track stats
