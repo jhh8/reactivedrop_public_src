@@ -12,6 +12,8 @@
 
 #ifdef CLIENT_DLL
 	#include "c_te_effect_dispatch.h"
+	#include "c_asw_player.h"
+	#include "asw_gamerules.h"
 #else
 	#include "te_effect_dispatch.h"
 #endif
@@ -195,6 +197,7 @@ class CPointToiletFlushable : public CBaseEntity,
 public:
 	CPointToiletFlushable()
 	{
+		AddEFlags( EFL_USE_PARTITION_WHEN_NOT_SOLID );
 #ifdef GAME_DLL
 		m_iszFlushSound = MAKE_STRING( "d1_trainstation.toiletflush" );
 		m_flCooldown = 10;
@@ -260,7 +263,35 @@ public:
 	DECLARE_CLIENTCLASS();
 
 	C_BaseEntity *GetEntity() override { return this; }
-	bool IsUsable( C_BaseEntity *pUser ) override { return m_flNextUse <= gpGlobals->curtime && pUser->GetAbsOrigin().DistToSqr( GetAbsOrigin() ) < Square( 64 ); }
+	bool IsUsable( C_BaseEntity *pUser ) override
+	{
+		if ( pUser->GetAbsOrigin().DistToSqr( GetAbsOrigin() ) >= Square( 64 ) )
+			return false;
+
+		if ( m_flNextUse <= gpGlobals->curtime )
+			return true;
+
+		C_ASW_Marine *pMarine = C_ASW_Marine::AsMarine( pUser );
+		// sanity check
+		if ( engine->IsPlayingDemo() || !pMarine || !pMarine->IsInhabited() || !pMarine->GetCommander() || !pMarine->GetCommander()->IsLocalPlayer() || !ASWGameRules() || ASWGameRules()->m_bCheated )
+			return false;
+
+		ISteamInventory *pSteamInventory = SteamInventory();
+		if ( !pSteamInventory )
+			return false;
+
+		// on second thought we don't need sanity we've got this instead
+		if ( pMarine->m_bOnFire && pMarine->IsInfested() )
+		{
+			SteamInventoryResult_t hResult;
+			if ( pSteamInventory->AddPromoItem( &hResult, 28 ) )
+			{
+				pSteamInventory->DestroyResult( hResult );
+			}
+		}
+
+		return false;
+	}
 	bool GetUseAction( ASWUseAction &action, C_ASW_Inhabitable_NPC *pUser ) override
 	{
 		action.wszText[0] = L'\0';
