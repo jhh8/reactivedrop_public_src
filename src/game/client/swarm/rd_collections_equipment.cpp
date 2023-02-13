@@ -8,13 +8,15 @@
 #include <vgui_controls/ImagePanel.h>
 #include <vgui_controls/Label.h>
 #include <vgui_controls/TextImage.h>
-#include <vgui_controls/Tooltip.h>
 #include "vgui_bitmapbutton.h"
 #include "gameui/swarm/vgenericpanellist.h"
 #include "nb_button.h"
 #include "ibriefing.h"
 #include "asw_medal_store.h"
 #include "asw_gamerules.h"
+#include "rd_steam_input.h"
+#include "briefingtooltip.h"
+#include "controller_focus.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -393,12 +395,16 @@ CRD_Collection_Entry_Equipment::CRD_Collection_Entry_Equipment( TGD_Grid *parent
 	m_pClassLabel = new vgui::Label( this, "ClassLabel", L"" );
 	m_pInfoButton = new CBitmapButton( this, "InfoButton", "" );
 	m_pInfoButton->AddActionSignalTarget( this );
+	m_hButtonFont = NULL;
+
+	SetPostChildPaintEnabled( true );
 }
 
 void CRD_Collection_Entry_Equipment::ApplySchemeSettings( vgui::IScheme *pScheme )
 {
 	BaseClass::ApplySchemeSettings( pScheme );
 
+	m_hButtonFont = pScheme->GetFont( "GameUIButtonsTiny", true );
 	m_pInfoButton->SetVisible( false );
 
 	color32 white{ 255, 255, 255, 255 };
@@ -536,7 +542,19 @@ void CRD_Collection_Entry_Equipment::OnThink()
 {
 	BaseClass::OnThink();
 
-	m_pInfoButton->SetEnabled( IsCursorOver() );
+	m_pInfoButton->SetEnabled( IsCursorOver() || m_pFocusHolder->HasFocus() );
+}
+
+void CRD_Collection_Entry_Equipment::PostChildPaint()
+{
+	BaseClass::PostChildPaint();
+
+	if ( m_pInfoButton->IsVisible() && m_pInfoButton->IsEnabled() && g_RD_Steam_Input.GetJoystickCount() > 0 )
+	{
+		int x, y, w, t;
+		m_pInfoButton->GetBounds( x, y, w, t );
+		g_RD_Steam_Input.DrawLegacyControllerGlyph( "X_BUTTON", x, y + t, 2, 2, m_hButtonFont );
+	}
 }
 
 void CRD_Collection_Entry_Equipment::ApplyEntry()
@@ -570,9 +588,11 @@ class CRD_Equipment_WeaponFact : public vgui::EditablePanel
 	DECLARE_CLASS_SIMPLE( CRD_Equipment_WeaponFact, vgui::EditablePanel );
 public:
 	CRD_Equipment_WeaponFact( vgui::Panel *parent, const char *panelName, CRD_Collection_Tab_Equipment *pTab, const RD_Swarmopedia::WeaponFact *pFact );
+	virtual ~CRD_Equipment_WeaponFact();
 
 	virtual void ApplySchemeSettings( vgui::IScheme *pScheme ) override;
 	virtual void PerformLayout() override;
+	virtual void OnThink() override;
 	virtual void OnCommand( const char *command ) override;
 
 	vgui::ImagePanel *m_pIcon;
@@ -604,6 +624,17 @@ CRD_Equipment_WeaponFact::CRD_Equipment_WeaponFact( vgui::Panel *parent, const c
 	}
 	m_pLblName = new vgui::Label( this, "LblName", L"" );
 	m_pLblValue = new vgui::Label( this, "LblValue", L"" );
+}
+
+CRD_Equipment_WeaponFact::~CRD_Equipment_WeaponFact()
+{
+	GetControllerFocus()->RemoveFromFocusList( m_pSkillIcon );
+
+	if ( g_hBriefingTooltip )
+	{
+		g_hBriefingTooltip->MarkForDeletion();
+		g_hBriefingTooltip = NULL;
+	}
 }
 
 void CRD_Equipment_WeaponFact::ApplySchemeSettings( vgui::IScheme *pScheme )
@@ -803,7 +834,7 @@ void CRD_Equipment_WeaponFact::ApplySchemeSettings( vgui::IScheme *pScheme )
 		m_pSkillIcon->SetImage( CBitmapButton::BUTTON_DISABLED, szSkillImage, color32{ 255, 255, 255, 255 } );
 		m_pSkillIcon->SetVisible( true );
 		m_pSkillIcon->SetEnabled( !m_pTab->m_pProfile );
-		m_pSkillIcon->GetTooltip()->SetText( MarineSkills()->GetSkillName( m_pFact->Skill ) );
+		GetControllerFocus()->AddToFocusList( m_pSkillIcon );
 
 		int iMaxSkillPoints = MarineSkills()->GetMaxSkillPoints( m_pFact->Skill );
 		int iSkillValue = m_pTab->m_nSkillValue[m_pFact->Skill];
@@ -980,6 +1011,37 @@ void CRD_Equipment_WeaponFact::PerformLayout()
 	m_pLblName->SetTall( iNewTall );
 	m_pLblValue->SetTall( iNewTall );
 	SetTall( iNewTall );
+}
+
+void CRD_Equipment_WeaponFact::OnThink()
+{
+	BaseClass::OnThink();
+
+	if ( m_pSkillIcon->IsCursorOver() || GetControllerFocus()->GetFocusPanel() == m_pSkillIcon )
+	{
+		if ( !g_hBriefingTooltip )
+		{
+			g_hBriefingTooltip = new BriefingTooltip( m_pTab->m_pParent->m_hOverridePanel, "MedalsTooltip" );
+		}
+		else if ( g_hBriefingTooltip->GetParent() != m_pTab->m_pParent->m_hOverridePanel )
+		{
+			g_hBriefingTooltip->SetParent( m_pTab->m_pParent->m_hOverridePanel );
+		}
+
+		if ( g_hBriefingTooltip && IsFullyVisible() &&
+			g_hBriefingTooltip->GetTooltipPanel() != this )
+		{
+			int tx, ty, w, h;
+			tx = ty = 0;
+			LocalToScreen( tx, ty );
+			m_pTab->m_pParent->m_hOverridePanel->ScreenToLocal( tx, ty );
+			GetSize( w, h );
+			tx += w * 0.9f;
+			ty += h * 1.1f;
+
+			g_hBriefingTooltip->SetTooltip( this, MarineSkills()->GetSkillName( m_pFact->Skill ), MarineSkills()->GetSkillDescription( m_pFact->Skill ), tx, ty, true );
+		}
+	}
 }
 
 void CRD_Equipment_WeaponFact::OnCommand( const char *command )

@@ -1545,6 +1545,7 @@ void CAlienSwarm::FullReset()
 	m_flStimStartTime = 0.0f;
 	m_fPreventStimMusicTime = 0.0f;
 	m_bForceStylinCam = false;
+	m_bShowCommanderFace = false;
 
 	m_fMarineDeathTime = 0.0f;
 	m_vMarineDeathPos = vec3_origin;
@@ -5288,7 +5289,11 @@ void CAlienSwarm::AlienKilled(CBaseEntity *pAlien, const CTakeDamageInfo &info)
 			if ( iClassIndex >= 0 )
 			{
 				CSingleUserRecipientFilter filter( pCommander );
-				filter.MakeReliable();
+				// allow dropping packets for the most common alien types
+				if ( pAlien->Classify() != CLASS_ASW_DRONE && pAlien->Classify() != CLASS_ASW_RANGER &&
+					pAlien->Classify() != CLASS_ASW_BUZZER && pAlien->Classify() != CLASS_ASW_BOOMER &&
+					pAlien->Classify() != CLASS_ASW_PARASITE && pAlien->Classify() != CLASS_ASW_GRUB )
+					filter.MakeReliable();
 				UserMessageBegin( filter, "RDAlienKillStat" );
 					WRITE_SHORT( iClassIndex );
 				MessageEnd();
@@ -5646,6 +5651,19 @@ bool CAlienSwarm::ShouldCollide( int collisionGroup0, int collisionGroup1 )
 		//Msg("Skipped houndeye col\n");
 		return false;
 	}
+
+	// don't let bots walk through players
+	if ( ( collisionGroup0 == ASW_COLLISION_GROUP_BOT_MOVEMENT && collisionGroup1 == COLLISION_GROUP_PLAYER ) ||
+		( collisionGroup0 == COLLISION_GROUP_PLAYER && collisionGroup1 == ASW_COLLISION_GROUP_BOT_MOVEMENT ) )
+	{
+		return true;
+	}
+
+	if ( collisionGroup0 == ASW_COLLISION_GROUP_BOT_MOVEMENT )
+		collisionGroup0 = ASW_COLLISION_GROUP_BOTS;
+
+	if ( collisionGroup1 == ASW_COLLISION_GROUP_BOT_MOVEMENT )
+		collisionGroup1 = ASW_COLLISION_GROUP_BOTS;
 
 	// reactivedrop: bots don't collide with one another
 	if ( collisionGroup0 == ASW_COLLISION_GROUP_BOTS && collisionGroup1 == ASW_COLLISION_GROUP_BOTS )

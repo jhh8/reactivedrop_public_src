@@ -903,6 +903,7 @@ void CASW_Marine::Precache()
 	PrecacheScriptSound( "ASW.MarineMeleeAttackFP" );
 	PrecacheScriptSound( "ASW.MarinePowerFistAttack" );
 	PrecacheScriptSound( "ASW.MarinePowerFistAttackFP" );
+	PrecacheScriptSound( "ASW.MarinePowerFistHitWorld" );
 	PrecacheScriptSound( "ASW_Weapon_Flamer.FlameLoop" );
 	PrecacheScriptSound( "ASW_Weapon_Flamer.FlameStop" );
 	PrecacheScriptSound( "ASW_Weapon_Minigun.MinigunLoop" );
@@ -1457,7 +1458,7 @@ int CASW_Marine::OnTakeDamage_Alive( const CTakeDamageInfo &info )
 		CBaseEntity *pHelpHelpImBeingSupressed = ( CBaseEntity * )te->GetSuppressHost();
 		te->SetSuppressHost( NULL );
 
-		DispatchParticleEffectLink( "leadership_proc_resist", PATTACH_POINT_FOLLOW, pLeader, this, pLeader->LookupAttachment( "backpack" ) );
+		DispatchParticleEffectLink( "leadership_proc_resist", PATTACH_POINT_FOLLOW, pLeader, this, pLeader->LookupAttachment( "officer_antenna_end" ) );
 		EmitSound( "ASW_Leadership.Resist" );
 
 		te->SetSuppressHost( pHelpHelpImBeingSupressed );

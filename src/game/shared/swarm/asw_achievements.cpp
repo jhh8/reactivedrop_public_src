@@ -6,8 +6,10 @@
 #include "c_asw_game_resource.h"
 #include "c_asw_marine.h"
 #include "c_asw_player.h"
+#include "c_user_message_register.h"
 #endif
 #include "rd_missions_shared.h"
+#include "rd_cause_of_death.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -631,10 +633,10 @@ DECLARE_RD_SPEEDRUN_ACHIEVEMENT( BIO_OPERATION_X5, 1273 );
 DECLARE_RD_SPEEDRUN_ACHIEVEMENT( BIO_INVISIBLE_THREAT, 1274 );
 DECLARE_RD_SPEEDRUN_ACHIEVEMENT( BIO_BIOGEN_LABS, 1275 );
 
-#ifdef RD_BONUS_MISSION_ACHIEVEMENTS
 DECLARE_RD_SPEEDRUN_ACHIEVEMENT( BONUS_SPC, 1276 );
 DECLARE_RD_SPEEDRUN_ACHIEVEMENT( BONUS_RAPTURE, 1277 );
 DECLARE_RD_SPEEDRUN_ACHIEVEMENT( BONUS_BUNKER, 1278 );
+#ifdef RD_BONUS_MISSION_ACHIEVEMENTS
 DECLARE_RD_SPEEDRUN_ACHIEVEMENT( UNSPLIT_JACOBS_1_2, 1279 );
 DECLARE_RD_SPEEDRUN_ACHIEVEMENT( UNSPLIT_PARANOIA_2_3, 1280 );
 DECLARE_RD_SPEEDRUN_ACHIEVEMENT( UNSPLIT_PARANOIA_4_5, 1281 );
@@ -1131,6 +1133,51 @@ class CAchievement_Hardcore : public CASW_Achievement
 DECLARE_ACHIEVEMENT_ORDER( CAchievement_Hardcore, ACHIEVEMENT_ASW_HARDCORE, "ASW_HARDCORE", 5, 3185 );
 
 DECLARE_ACHIEVEMENT_ORDER( CAchievement_Server_Triggered, ACHIEVEMENT_RD_NH_BONUS_OBJECTIVE, "RD_NH_BONUS_OBJECTIVE", 5, 3186 );
+
+class CAchievement_Die_In_Many_Ways : public CASW_Achievement
+{
+	void Init()
+	{
+		SetFlags( ACH_SAVE_GLOBAL );
+		SetGoal( 25 );
+		SetStoreProgressInSteam( true );
+	}
+
+	void CheckDeathTypeCount()
+	{
+		ISteamUserStats *pSteamUserStats = SteamUserStats();
+		if ( !pSteamUserStats )
+			return;
+
+		int32_t nCount = 0;
+		int nDeathTypes = 0;
+		for ( int i = 0; i < DEATHCAUSE_COUNT && !IsAchieved(); i++ )
+		{
+			if ( pSteamUserStats->GetStat( g_szDeathCauseStatName[i], &nCount ) && nCount )
+			{
+				nDeathTypes++;
+				if ( nDeathTypes > GetCount() )
+				{
+					IncrementCount();
+				}
+			}
+		}
+	}
+
+	friend void CheckDeathTypeCount();
+};
+DECLARE_ACHIEVEMENT_ORDER( CAchievement_Die_In_Many_Ways, ACHIEVEMENT_RD_DIE_IN_MANY_WAYS, "RD_DIE_IN_MANY_WAYS", 5, 3187 );
+
+void CheckDeathTypeCount()
+{
+	CASW_Achievement_Manager *pMgr = ASWAchievementManager();
+	if ( !pMgr )
+		return;
+
+	CBaseAchievement *pAchievement = pMgr->GetAchievementByID( ACHIEVEMENT_RD_DIE_IN_MANY_WAYS, GET_ACTIVE_SPLITSCREEN_SLOT() );
+	if ( pAchievement )
+		assert_cast< CAchievement_Die_In_Many_Ways * >( pAchievement )->CheckDeathTypeCount();
+}
 
 CON_COMMAND_F( rd_achievement_order, "", FCVAR_HIDDEN )
 {
