@@ -65,6 +65,9 @@ BEGIN_DATADESC( CASW_Door )
 	DEFINE_FIELD( m_bRecommendedSeal, FIELD_BOOLEAN ),
 	DEFINE_FIELD( m_bWasWeldedByMarine, FIELD_BOOLEAN ),
 
+	DEFINE_FIELD( m_iszDoorHitSound, FIELD_SOUNDNAME ),
+	DEFINE_FIELD( m_iszDoorDentSound, FIELD_SOUNDNAME ),
+
 	DEFINE_THINKFUNC( RunAnimation ),
 
 	DEFINE_INPUTFUNC( FIELD_VOID, "NPCNear", InputNPCNear ),
@@ -151,10 +154,25 @@ CASW_Door::~CASW_Door( void )
 
 void CASW_Door::Precache()
 {
-	PrecacheScriptSound( "ASW_Door.Dented" );
-	PrecacheScriptSound( "ASW_Door.MeleeHit" );
 	PrecacheScriptSound( "ASW_Welder.WeldDeny" );
+
 	BaseClass::Precache();
+
+	int iModelIndex = modelinfo->GetModelIndex( STRING( GetModelName() ) );
+	const model_t *pModel = modelinfo->GetModel( iModelIndex );
+
+	KeyValues::AutoDelete pKV( "" );
+	CUtlBuffer buf( 1024, 0, CUtlBuffer::TEXT_BUFFER );
+	if ( modelinfo->GetModelKeyValue( pModel, buf ) )
+	{
+		pKV->LoadFromBuffer( modelinfo->GetModelName( pModel ), buf );
+	}
+
+	m_iszDoorHitSound = AllocPooledString( pKV->GetString( "asw_door/hit_sound", "ASW_Door.MeleeHit" ) );
+	m_iszDoorDentSound = AllocPooledString( pKV->GetString( "asw_door/dent_sound", "ASW_Door.Dented" ) );
+
+	PrecacheScriptSound( STRING( m_iszDoorHitSound ) );
+	PrecacheScriptSound( STRING( m_iszDoorDentSound ) );
 }
 
 void CASW_Door::Spawn()
@@ -1119,7 +1137,7 @@ int CASW_Door::OnTakeDamage( const CTakeDamageInfo &info )
 
 	if ( info.GetDamageType() == DMG_SLASH || info.GetDamageType() == DMG_CLUB )			// if an alien claw attack, then check if it's bashable
 	{
-		EmitSound( "ASW_Door.MeleeHit" );
+		EmitSound( STRING( m_iszDoorHitSound ) );
 
 		if ( !m_bBashable )
 			return 0;
@@ -1429,7 +1447,7 @@ void CASW_Door::DoorSmoke()
 		pEmitter->Spawn();
 		g_EventQueue.AddEvent( pEmitter, "Kill", 2.0f, pEmitter, pEmitter );
 	}
-	EmitSound( "ASW_Door.Dented" );
+	EmitSound( STRING( m_iszDoorDentSound ) );
 }
 
 void CASW_Door::Event_Killed( const CTakeDamageInfo &info )

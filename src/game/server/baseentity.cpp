@@ -5418,7 +5418,7 @@ void CBaseEntity::PrecacheModelComponents( int nModelIndex )
 
 			KeyValues *pParticleEffects = pModelKeyValues->FindKey(keyParticles);
 			if ( pParticleEffects )
-			{						   
+			{
 				// Start grabbing the sounds and slotting them in
 				for ( KeyValues *pSingleEffect = pParticleEffects->GetFirstSubKey(); pSingleEffect; pSingleEffect = pSingleEffect->GetNextKey() )
 				{
