@@ -182,8 +182,17 @@ public:
 	bool CreateLightEffects();	
 	CFlashlightEffect *m_pFlashlight;	// projector flashlight
 	void ReleaseFlashlightBeam();		// release beam flashlight
-	Beam_t	*m_pFlashlightBeam;
-	dlight_t* m_pFlashlightDLight;
+	Beam_t *m_pFlashlightBeam;
+	dlight_t *m_pFlashlightDLight;
+
+	// night vision
+	bool IsVisionActive();
+	float UpdateVisionAlpha();
+	float UpdateFlashAlpha();
+	CNetworkVar( bool, m_bNightVision );
+	float m_flVisionAlpha;
+	float m_flFlashAlpha;
+	bool m_bOldVisionActive;
 
 	// hacking
 	bool m_bHacking;
@@ -407,6 +416,8 @@ public:
 	CNetworkVar( int, m_iForcedActionRequest );
 	static C_ASW_Marine* GetLocalMarine();
 	static C_ASW_Marine* GetViewMarine();
+
+	Vector m_vecMarineColor;
 
 private:
 	CMotionBlurObject m_MotionBlurObject;

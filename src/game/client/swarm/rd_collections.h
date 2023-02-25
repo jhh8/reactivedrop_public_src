@@ -3,7 +3,7 @@
 #include "tabbedgriddetails.h"
 #include "asw_model_panel.h"
 #include "asw_marine_skills.h"
-#include "steam/steam_api.h"
+#include "rd_inventory_shared.h"
 
 class CASW_WeaponInfo;
 class CASW_Marine_Profile;
@@ -160,6 +160,7 @@ public:
 	virtual void OnThink() override;
 
 	void UpdateErrorMessage( TGD_Grid *pGrid );
+	void LoadCachedInventory();
 
 	const char *m_szSlot;
 	SteamInventoryResult_t m_hResult;
@@ -177,6 +178,7 @@ public:
 	virtual void OnThink() override;
 	virtual void DisplayEntry( TGD_Entry *pEntry ) override;
 
+	vgui::Panel *m_pIconBackground;
 	vgui::ImagePanel *m_pIcon;
 	vgui::RichText *m_pTitle;
 	vgui::RichText *m_pDescription;
@@ -186,18 +188,20 @@ class CRD_Collection_Entry_Inventory : public TGD_Entry
 {
 	DECLARE_CLASS_SIMPLE( CRD_Collection_Entry_Inventory, TGD_Entry );
 public:
-	CRD_Collection_Entry_Inventory( TGD_Grid *parent, const char *panelName, int index, SteamItemDetails_t details );
+	CRD_Collection_Entry_Inventory( TGD_Grid *parent, const char *panelName, SteamInventoryResult_t hResult, int index );
+	CRD_Collection_Entry_Inventory( TGD_Grid *parent, const char *panelName, KeyValues *pCached, int index );
 
 	virtual void ApplySchemeSettings( vgui::IScheme *pScheme ) override;
 	virtual void ApplyEntry() override;
 
 	CRD_Collection_Tab_Inventory *GetTab();
 
+	vgui::Panel *m_pIconBackground;
 	vgui::ImagePanel *m_pIcon;
 	vgui::ImagePanel *m_pEquippedMarker;
 
 	int m_Index;
-	SteamItemDetails_t m_Details;
+	ReactiveDropInventory::ItemInstance_t m_Details;
 };
 
 class CRD_Collection_Tab_Swarmopedia : public TGD_Tab

@@ -111,6 +111,12 @@ public:
 	void OnTonemapTriggerStartTouch( CTonemapTrigger *pTonemapTrigger );
 	void OnTonemapTriggerEndTouch( CTonemapTrigger *pTonemapTrigger );
 	CUtlVector<CHandle<CTonemapTrigger>> m_hTriggerTonemapList;
+	void ScriptSetGlow( Vector vecColor, float flAlpha, bool bGlowWhenOccluded, bool bGlowWhenUnoccluded, bool bFullBloom );
+	CNetworkVector( m_vecGlowColor );
+	CNetworkVar( float, m_flGlowAlpha );
+	CNetworkVar( bool, m_bGlowWhenOccluded );
+	CNetworkVar( bool, m_bGlowWhenUnoccluded );
+	CNetworkVar( bool, m_bGlowFullBloom );
 
 	// health
 	IMPLEMENT_NETWORK_VAR_FOR_DERIVED( m_iHealth );
@@ -167,6 +173,9 @@ public:
 
 	void ScriptOrderMoveTo( HSCRIPT hOrderObject, bool bIgnoreMarines );
 	void ScriptChaseNearestMarine();
+
+	void SetSpawnZombineOnMarineKill( bool bSpawn );
+	bool m_bSpawnZombineOnMarineKill;
 
 	AlienOrder_t m_AlienOrders;
 	Vector m_vecAlienOrderSpot;

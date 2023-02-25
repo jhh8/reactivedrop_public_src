@@ -87,9 +87,7 @@ CNB_Lobby_Row::CNB_Lobby_Row( vgui::Panel *parent, const char *name ) : BaseClas
 	m_pXPBar->SetColors( Color( 255, 255, 255, 0 ), Color( 93,148,192,255 ), Color( 255, 255, 255, 255 ), Color( 17,37,57,255 ), Color( 35, 77, 111, 255 ) );
 	//m_pXPBar->m_bShowCumulativeTotal = true;
 	m_nLastPromotion = 0;
-	m_nMedalUpdates = 0;
-	m_hMedalResult = k_SteamInventoryResultInvalid;
-	m_bWaitingForMedal = false;
+	m_lastMedal = 0;
 
 	m_pXPBar->m_flBorder = 1.5f;
 	m_nLobbySlot = 0;
@@ -106,11 +104,6 @@ CNB_Lobby_Row::~CNB_Lobby_Row()
 	GetControllerFocus()->RemoveFromFocusList( m_pWeaponButton0 );
 	GetControllerFocus()->RemoveFromFocusList( m_pWeaponButton1 );
 	GetControllerFocus()->RemoveFromFocusList( m_pWeaponButton2 );
-
-	if ( ISteamInventory *pInventory = SteamInventory() )
-	{
-		pInventory->DestroyResult( m_hMedalResult );
-	}
 }
 
 void CNB_Lobby_Row::ApplySchemeSettings( vgui::IScheme *pScheme )
@@ -212,7 +205,7 @@ void CNB_Lobby_Row::UpdateDetails()
 	lightblue.b = 192;
 	lightblue.a = 255;
 
-	BaseModHybridButton	*pButton = m_pNameDropdown->GetButton();
+	BaseModHybridButton *pButton = m_pNameDropdown->GetButton();
 	if ( pButton )
 	{
 		pButton->SetText( Briefing()->GetMarineOrPlayerName( m_nLobbySlot ) );
@@ -229,31 +222,27 @@ void CNB_Lobby_Row::UpdateDetails()
 
 			int wide, tall;
 			m_pAvatarImage->GetSize( wide, tall );
-			((CAvatarImage*)m_pAvatarImage->GetImage())->SetAvatarSize( wide, tall );
-			((CAvatarImage*)m_pAvatarImage->GetImage())->SetPos( -AVATAR_INDENT_X, -AVATAR_INDENT_Y );
+			( ( CAvatarImage * )m_pAvatarImage->GetImage() )->SetAvatarSize( wide, tall );
+			( ( CAvatarImage * )m_pAvatarImage->GetImage() )->SetPos( -AVATAR_INDENT_X, -AVATAR_INDENT_Y );
 
-			m_nMedalUpdates = 0;
 			m_pMedalIcon->SetVisible( false );
-			m_bWaitingForMedal = ReactiveDropInventory::DecodeItemData( m_hMedalResult, "" );
+			m_lastMedal = 0;
 		}
 		m_lastSteamID = steamID;
 
-		int nMedalUpdates = Briefing()->GetMedalUpdateCount( m_nLobbySlot );
-		if ( m_nMedalUpdates != nMedalUpdates )
+		SteamItemDef_t iMedal = Briefing()->GetEquippedMedal( m_nLobbySlot ).m_iItemDefID;
+		if ( iMedal != m_lastMedal )
 		{
-			m_pMedalIcon->SetVisible( false );
-			m_bWaitingForMedal = ReactiveDropInventory::DecodeItemData( m_hMedalResult, Briefing()->GetEncodedMedalData( m_nLobbySlot ) );
-			m_nMedalUpdates = nMedalUpdates;
-		}
-		bool bMedalOK = false;
-		if ( m_bWaitingForMedal && ReactiveDropInventory::ValidateItemData( bMedalOK, m_hMedalResult, "medal", steamID ) )
-		{
-			m_bWaitingForMedal = false;
-			if ( bMedalOK )
+			if ( iMedal <= 0 )
 			{
-				const ReactiveDropInventory::ItemDef_t *pDef = ReactiveDropInventory::GetItemDef( ReactiveDropInventory::GetItemDetails( m_hMedalResult, 0 ).m_iDefinition );
+				m_pMedalIcon->SetVisible( false );
+				m_lastMedal = iMedal;
+			}
+			else if ( const ReactiveDropInventory::ItemDef_t *pDef = ReactiveDropInventory::GetItemDef( iMedal ) )
+			{
 				m_pMedalIcon->SetImage( pDef->IconSmall );
 				m_pMedalIcon->SetVisible( true );
+				m_lastMedal = iMedal;
 			}
 		}
 	}
@@ -275,10 +264,10 @@ void CNB_Lobby_Row::UpdateDetails()
 		m_nLastPromotion = nPromotion;
 	}
 	m_pXPBar->ClearMinMax();
-	m_pXPBar->AddMinMax( 0, g_iLevelExperience[ 0 ] * g_flPromotionXPScale[ m_nLastPromotion ] );
+	m_pXPBar->AddMinMax( 0, g_iLevelExperience[0] * g_flPromotionXPScale[m_nLastPromotion] );
 	for ( int i = 0; i < ASW_NUM_EXPERIENCE_LEVELS - 1; i++ )
 	{
-		m_pXPBar->AddMinMax( g_iLevelExperience[ i ] * g_flPromotionXPScale[ m_nLastPromotion ], g_iLevelExperience[ i + 1 ] * g_flPromotionXPScale[ m_nLastPromotion ] );
+		m_pXPBar->AddMinMax( g_iLevelExperience[i] * g_flPromotionXPScale[m_nLastPromotion], g_iLevelExperience[i + 1] * g_flPromotionXPScale[m_nLastPromotion] );
 	}
 
 	if ( !Briefing()->IsFullyConnected( m_nLobbySlot ) )
@@ -298,8 +287,8 @@ void CNB_Lobby_Row::UpdateDetails()
 		m_pLevelLabel->SetVisible( true );
 
 		m_pXPBar->Init( nXP, nXP, 1.0, true, false );
-	
-		wchar_t szLevelNum[16]=L"";
+
+		wchar_t szLevelNum[16] = L"";
 		V_snwprintf( szLevelNum, ARRAYSIZE( szLevelNum ), L"%i", nLevel );
 
 		wchar_t wzLevelLabel[64];
@@ -308,7 +297,7 @@ void CNB_Lobby_Row::UpdateDetails()
 	}
 
 	ASW_Marine_Class nMarineClass = Briefing()->GetMarineClass( m_nLobbySlot );
-	switch( nMarineClass )
+	switch ( nMarineClass )
 	{
 	case MARINE_CLASS_NCO: m_pClassLabel->SetText( "#marine_class_officer" ); break;
 	case MARINE_CLASS_SPECIAL_WEAPONS: m_pClassLabel->SetText( "#marine_class_sw_short" ); break;
@@ -318,7 +307,7 @@ void CNB_Lobby_Row::UpdateDetails()
 	}
 	m_pClassLabel->SetVisible( true );
 
-	switch( nMarineClass )
+	switch ( nMarineClass )
 	{
 	case MARINE_CLASS_NCO: m_pClassImage->SetImage( "swarm/ClassIcons/NCOClassIcon" ); break;
 	case MARINE_CLASS_SPECIAL_WEAPONS: m_pClassImage->SetImage( "swarm/ClassIcons/SpecialWeaponsClassIcon" ); break;
@@ -326,7 +315,7 @@ void CNB_Lobby_Row::UpdateDetails()
 	case MARINE_CLASS_TECH: m_pClassImage->SetImage( "swarm/ClassIcons/TechClassIcon" ); break;
 	}
 	m_pClassImage->SetVisible( nMarineClass != MARINE_CLASS_UNDEFINED );
-		
+
 	if ( Briefing()->IsOfflineGame() && m_nLobbySlot != 0 )
 	{
 		// AI slots
@@ -346,7 +335,7 @@ void CNB_Lobby_Row::UpdateDetails()
 	{
 		m_pAvatarImage->SetVisible( true );
 	}
-	
+
 
 	CASW_Marine_Profile *pProfile = Briefing()->GetMarineProfile( m_nLobbySlot );
 	if ( !pProfile )
@@ -373,7 +362,7 @@ void CNB_Lobby_Row::UpdateDetails()
 	else
 	{
 		char imagename[255];
-		Q_snprintf( imagename, sizeof(imagename), "vgui/briefing/face_%s", pProfile->m_PortraitName );		
+		Q_snprintf( imagename, sizeof( imagename ), "vgui/briefing/face_%s", pProfile->m_PortraitName );
 		if ( Q_strcmp( imagename, m_szLastPortraitImage ) )
 		{
 			Q_snprintf( m_szLastPortraitImage, sizeof( m_szLastPortraitImage ), "%s", imagename );
@@ -382,7 +371,7 @@ void CNB_Lobby_Row::UpdateDetails()
 
 			if ( Briefing()->IsLobbySlotLocal( m_nLobbySlot ) )
 			{
-				Q_snprintf( imagename, sizeof(imagename), "vgui/briefing/face_%s_lit", pProfile->m_PortraitName );
+				Q_snprintf( imagename, sizeof( imagename ), "vgui/briefing/face_%s_lit", pProfile->m_PortraitName );
 			}
 			m_pPortraitButton->SetImage( CBitmapButton::BUTTON_ENABLED_MOUSE_OVER, imagename, white );
 		}
@@ -395,23 +384,23 @@ void CNB_Lobby_Row::UpdateDetails()
 		vgui::ImagePanel *pSilhouette = NULL;
 		switch ( i )
 		{
-			case ASW_INVENTORY_SLOT_PRIMARY:  pButton = m_pWeaponButton0; pSilhouette = m_pSilhouetteWeapon0; break;
-			case ASW_INVENTORY_SLOT_SECONDARY:  pButton = m_pWeaponButton1; pSilhouette = m_pSilhouetteWeapon1; break;
-			case ASW_INVENTORY_SLOT_EXTRA:  pButton = m_pWeaponButton2; pSilhouette = m_pSilhouetteWeapon2; break;
+		case ASW_INVENTORY_SLOT_PRIMARY:  pButton = m_pWeaponButton0; pSilhouette = m_pSilhouetteWeapon0; break;
+		case ASW_INVENTORY_SLOT_SECONDARY:  pButton = m_pWeaponButton1; pSilhouette = m_pSilhouetteWeapon1; break;
+		case ASW_INVENTORY_SLOT_EXTRA:  pButton = m_pWeaponButton2; pSilhouette = m_pSilhouetteWeapon2; break;
 		}
 
-		int nWeapon = Briefing()->GetMarineSelectedWeapon( m_nLobbySlot, i );	
-		if ( nWeapon != -1 && ASWEquipmentList() )
+		int nWeapon = Briefing()->GetMarineSelectedWeapon( m_nLobbySlot, i );
+		if ( nWeapon != -1 )
 		{
-			CASW_EquipItem *pItem = ASWEquipmentList()->GetItemForSlot( i, nWeapon );
+			CASW_EquipItem *pItem = g_ASWEquipmentList.GetItemForSlot( i, nWeapon );
 			if ( pItem )
 			{
-				CASW_WeaponInfo* pWeaponInfo = ASWEquipmentList()->GetWeaponDataFor( STRING( pItem->m_EquipClass ) );
+				CASW_WeaponInfo *pWeaponInfo = g_ASWEquipmentList.GetWeaponDataFor( pItem->m_szEquipClass );
 				if ( pButton && pWeaponInfo )
-				{				
+				{
 					bSetButtonImage = true;
 					char imagename[255];
-					Q_snprintf( imagename, sizeof(imagename), "vgui/%s", pWeaponInfo->szEquipIcon );
+					Q_snprintf( imagename, sizeof( imagename ), "vgui/%s", pWeaponInfo->szEquipIcon );
 					if ( Q_strcmp( imagename, m_szLastWeaponImage[i] ) )
 					{
 						Q_snprintf( m_szLastWeaponImage[i], sizeof( m_szLastWeaponImage[i] ), "%s", imagename );
@@ -464,7 +453,7 @@ void CNB_Lobby_Row::CheckTooltip( CNB_Lobby_Tooltip *pTooltip )
 	}
 	else if ( CControllerFocus::IsPanelReallyVisible( m_pMedalIcon ) && m_pMedalIcon->IsCursorOver() )
 	{
-		pTooltip->ShowMarineMedalTooltip( m_nLobbySlot, m_hMedalResult );
+		pTooltip->ShowMarineMedalTooltip( m_nLobbySlot );
 	}
 }
 

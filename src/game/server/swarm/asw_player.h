@@ -14,6 +14,7 @@
 #include "asw_info_message_shared.h"
 #include "basemultiplayerplayer.h"
 #include "steam/steam_api.h"
+#include "rd_inventory_shared.h"
 
 class CASW_Inhabitable_NPC;
 class CASW_Marine;
@@ -267,6 +268,10 @@ public:
 	int32 m_iStatNumXP[ ASW_NUM_XP_TYPES ];
 	CNetworkVar( int, m_iNetworkedXP );
 	CNetworkVar( int, m_iNetworkedPromotion );
+	SteamInventoryResult_t m_EquippedItems[RD_NUM_STEAM_INVENTORY_EQUIP_SLOTS];
+	CNetworkVarEmbedded( CRD_ItemInstance, m_EquippedMedal );
+	void ClearEquippedItemForSlot( const char *szSlot );
+	void SetEquippedItemForSlot( const char *szSlot, const ReactiveDropInventory::ItemInstance_t &instance );
 
 	bool m_bHasAwardedXP;
 	bool m_bPendingSteamStats;

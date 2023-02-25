@@ -48,6 +48,7 @@
 #include <vgui/ISurface.h>
 #include <vgui/IScheme.h>
 #include "stats_report.h"
+#include "asw_weapon_night_vision.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -88,6 +89,12 @@ ConVar rd_client_marine_backpacks( "rd_client_marine_backpacks", "0", FCVAR_NONE
 extern ConVar asw_DebugAutoAim;
 extern ConVar rd_revive_duration;
 extern ConVar rd_aim_marines;
+extern ConVar rd_highlight_active_character;
+extern ConVar asw_night_vision_fade_in_speed;
+extern ConVar asw_night_vision_fade_out_speed;
+extern ConVar asw_night_vision_flash_min;
+extern ConVar asw_night_vision_flash_max;
+extern ConVar asw_night_vision_flash_speed; 
 extern float g_fMarinePoisonDuration;
 
 #define FLASHLIGHT_DISTANCE		1000
@@ -193,6 +200,7 @@ BEGIN_NETWORK_TABLE( CASW_Marine, DT_ASW_Marine )
 	RecvPropBool	( RECVINFO( m_bForceWalking )),
 	RecvPropBool	( RECVINFO( m_bRolls )),
 	RecvPropInt		( RECVINFO( m_nMarineProfile ) ),
+	RecvPropBool	( RECVINFO( m_bNightVision ) ),
 END_RECV_TABLE()
 
 BEGIN_PREDICTION_DATA( C_ASW_Marine )
@@ -435,6 +443,9 @@ C_ASW_Marine::C_ASW_Marine() :
 	//m_fAmbientLight = asw_marine_ambient.GetFloat();
 	//m_fLightingScale = asw_marine_lightscale.GetFloat();
 	m_pFlashlight = NULL;
+	m_flVisionAlpha = 0.0f;
+	m_flFlashAlpha = 0.0f;
+	m_bOldVisionActive = false;
 	m_TouchingDoors.RemoveAll();
 	bPlayingFlamerSound = false;
 	bPlayingFireExtinguisherSound = false;
@@ -701,11 +712,11 @@ C_ASW_Marine_Resource *C_ASW_Marine::GetMarineResource()
 
 				if ( i >= 0 && i < NELEMS( g_rgbaStatsReportPlayerColors ) )
 				{
-					m_GlowObject.SetColor( Vector{
+					m_vecMarineColor.Init(
 						g_rgbaStatsReportPlayerColors[i].r() / 255.0f,
 						g_rgbaStatsReportPlayerColors[i].g() / 255.0f,
-						g_rgbaStatsReportPlayerColors[i].b() / 255.0f,
-					} );
+						g_rgbaStatsReportPlayerColors[i].b() / 255.0f
+					);
 				}
 				return pMR;
 			}
@@ -943,6 +954,12 @@ void C_ASW_Marine::ClientThink()
 	UpdateFireEmitters();
 	UpdateJumpJetEffects();
 	UpdateElectrifiedArmor();
+
+	C_ASW_Player *pLocalPlayer = C_ASW_Player::GetLocalASWPlayer();
+	if ( rd_highlight_active_character.GetBool() && pLocalPlayer && pLocalPlayer->GetViewNPC() == this )
+	{
+		m_GlowObject.SetColor( m_vecMarineColor );
+	}
 
 	extern ConVar asw_allow_detach;
 	if ( pViewMarine == this && pPlayer && pPlayer->GetASWControls() == ASWC_FIRSTPERSON && !asw_allow_detach.GetBool() )
@@ -2121,6 +2138,51 @@ void C_ASW_Marine::ReleaseFlashlightBeam( void )
 
 		m_pFlashlightBeam = NULL;
 	}
+}
+
+bool C_ASW_Marine::IsVisionActive()
+{
+	if ( m_bNightVision )
+		return true;
+
+	C_ASW_Weapon *pExtra = GetASWWeapon( ASW_INVENTORY_SLOT_EXTRA );
+	if ( !pExtra || pExtra->Classify() != CLASS_ASW_NIGHT_VISION )
+		return false;
+
+	C_ASW_Weapon_Night_Vision *pNightVision = assert_cast< C_ASW_Weapon_Night_Vision * >( pExtra );
+	return pNightVision->IsVisionActive();
+}
+
+float C_ASW_Marine::UpdateVisionAlpha()
+{
+	if ( IsVisionActive() )
+	{
+		m_flVisionAlpha = MIN( 255.0f, m_flVisionAlpha + gpGlobals->frametime * asw_night_vision_fade_in_speed.GetFloat() );
+	}
+	else
+	{
+		m_flVisionAlpha = MAX( 0.0f, m_flVisionAlpha - gpGlobals->frametime * asw_night_vision_fade_out_speed.GetFloat() );
+	}
+	return m_flVisionAlpha;
+}
+
+float C_ASW_Marine::UpdateFlashAlpha()
+{
+	if ( IsVisionActive() != m_bOldVisionActive )
+	{
+		m_flFlashAlpha = asw_night_vision_flash_max.GetFloat();
+		m_bOldVisionActive = IsVisionActive();
+	}
+
+	float flMin = 0.0f;
+	if ( IsVisionActive() )
+	{
+		flMin = asw_night_vision_flash_min.GetFloat();
+	}
+
+	m_flFlashAlpha = MAX( flMin, m_flFlashAlpha - gpGlobals->frametime * asw_night_vision_flash_speed.GetFloat() );
+
+	return m_flFlashAlpha;
 }
 
 // EF_NODRAW isn't preventing the marine from being drawn, strangely.  So we do a visible check here before drawing.

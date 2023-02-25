@@ -22,6 +22,7 @@
 #include "c_user_message_register.h"
 #include "asw_alien_classes.h"
 #include "rd_cause_of_death.h"
+#include "rd_inventory_shared.h"
 
 CASW_Steamstats g_ASW_Steamstats;
 
@@ -80,10 +81,14 @@ namespace
 		"rd_research7",
 		"rd-area9800",
 		"rd-tarnorcampaign1",
+#ifdef RD__CAMPAIGNS_DEADCITY
 		"rd_deadcity",
+#endif
 		"tilarus5",
 		"rd_lanasescape_campaign",
+#ifdef RD__CAMPAIGNS_REDUCTION
 		"rd_reduction_campaign",
+#endif
 		"rd_paranoia",
 		"rd_nh_campaigns",
 		"rd_biogen_corporation",
@@ -121,9 +126,11 @@ namespace
 		"rd-tft1desertoutpost",
 		"rd-tft2abandonedmaintenance",
 		"rd-tft3spaceport",
+#ifdef RD__CAMPAIGNS_DEADCITY
 		"rd-dc1_omega_city",
 		"rd-dc2_breaking_an_entry",
 		"rd-dc3_search_and_rescue",
+#endif
 		"rd-til1midnightport",
 		"rd-til2roadtodawn",
 		"rd-til3arcticinfiltration",
@@ -138,12 +145,14 @@ namespace
 		"rd-lan3_maintenance",
 		"rd-lan4_vent",
 		"rd-lan5_complex",
+#ifdef RD__CAMPAIGNS_REDUCTION
 		"rd-reduction1",
 		"rd-reduction2",
 		"rd-reduction3",
 		"rd-reduction4",
 		"rd-reduction5",
 		"rd-reduction6",
+#endif
 		"rd-par1unexpected_encounter",
 		"rd-par2hostile_places",
 		"rd-par3close_contact",
@@ -255,7 +264,7 @@ bool IsWorkshopCampaign()
 		return false;
 
 	CASW_Campaign_Save *pCampaign = ASWGameRules()->GetCampaignSave();
-	if ( pCampaign )
+	if ( pCampaign && ASWGameRules()->IsCampaignGame() )
 	{
 		const char *szCampaignName = pCampaign->GetCampaignName();
 
@@ -523,14 +532,13 @@ bool CASW_Steamstats::FetchStats( CSteamID playerSteamID, CASW_Player *pPlayer )
 	FETCH_STEAM_STATS( "playtime.total", m_iTotalPlayTime );
 
 	// Fetch starting equip information
-	int i = 0;
-	while ( ASWEquipmentList()->GetRegular( i ) )
+	for ( int i = 0; i < ASW_NUM_EQUIP_REGULAR; i++ )
 	{
 		// Get weapon information
-		if ( IsDamagingWeapon( ASWEquipmentList()->GetRegular( i )->m_EquipClass, false ) )
+		if ( IsDamagingWeapon( g_ASWEquipmentList.GetRegular( i )->m_EquipClass, false ) )
 		{
 			int weaponIndex = m_WeaponStats.AddToTail();
-			const char *szClassname = ASWEquipmentList()->GetRegular( i )->m_EquipClass;
+			const char *szClassname = g_ASWEquipmentList.GetRegular( i )->m_EquipClass;
 			m_WeaponStats[weaponIndex].FetchWeaponStats( playerSteamID, szClassname );
 			m_WeaponStats[weaponIndex].m_iWeaponIndex = GetDamagingWeaponClassFromName( szClassname );
 			m_WeaponStats[weaponIndex].m_bIsExtra = false;
@@ -539,23 +547,22 @@ bool CASW_Steamstats::FetchStats( CSteamID playerSteamID, CASW_Player *pPlayer )
 
 		// For primary equips
 		int32 iTempCount;
-		FETCH_STEAM_STATS( CFmtStr( "equips.%s.primary", ASWEquipmentList()->GetRegular( i )->m_EquipClass ), iTempCount );
+		FETCH_STEAM_STATS( CFmtStr( "equips.%s.primary", g_ASWEquipmentList.GetRegular( i )->m_EquipClass ), iTempCount );
 		m_PrimaryEquipCounts.AddToTail( iTempCount );
 
 		// For secondary equips
 		iTempCount;
-		FETCH_STEAM_STATS( CFmtStr( "equips.%s.secondary", ASWEquipmentList()->GetRegular( i++ )->m_EquipClass ), iTempCount );
+		FETCH_STEAM_STATS( CFmtStr( "equips.%s.secondary", g_ASWEquipmentList.GetRegular( i )->m_EquipClass ), iTempCount );
 		m_SecondaryEquipCounts.AddToTail( iTempCount );
 	}
 
-	i = 0;
-	while ( ASWEquipmentList()->GetExtra( i ) )
+	for ( int i = 0; i < ASW_NUM_EQUIP_EXTRA; i++ )
 	{
 		// Get weapon information
-		if ( IsDamagingWeapon( ASWEquipmentList()->GetExtra( i )->m_EquipClass, true ) )
+		if ( IsDamagingWeapon( g_ASWEquipmentList.GetExtra( i )->m_EquipClass, true ) )
 		{
 			int weaponIndex = m_WeaponStats.AddToTail();
-			const char *szClassname = ASWEquipmentList()->GetExtra( i )->m_EquipClass;
+			const char *szClassname = g_ASWEquipmentList.GetExtra( i )->m_EquipClass;
 			m_WeaponStats[weaponIndex].FetchWeaponStats( playerSteamID, szClassname );
 			m_WeaponStats[weaponIndex].m_iWeaponIndex = GetDamagingWeaponClassFromName( szClassname );
 			m_WeaponStats[weaponIndex].m_bIsExtra = true;
@@ -563,7 +570,7 @@ bool CASW_Steamstats::FetchStats( CSteamID playerSteamID, CASW_Player *pPlayer )
 		}
 
 		int32 iTempCount;
-		FETCH_STEAM_STATS( CFmtStr( "equips.%s.total", ASWEquipmentList()->GetExtra( i++ )->m_EquipClass ), iTempCount );
+		FETCH_STEAM_STATS( CFmtStr( "equips.%s.total", g_ASWEquipmentList.GetExtra( i )->m_EquipClass ), iTempCount );
 		m_ExtraEquipCounts.AddToTail( iTempCount );
 	}
 
@@ -605,18 +612,17 @@ bool CASW_Steamstats::FetchStats( CSteamID playerSteamID, CASW_Player *pPlayer )
 
 
 	// Fetch marine counts
-	i = 0;
-	while ( MarineProfileList()->GetProfile( i ) )
+	for ( int i = 0; i < ASW_NUM_MARINE_PROFILES; i++ )
 	{
 		int32 iTempCount;
-		FETCH_STEAM_STATS( CFmtStr( "marines.%i.total", i++ ), iTempCount );
+		FETCH_STEAM_STATS( CFmtStr( "marines.%i.total", i ), iTempCount );
 		m_MarineSelectionCounts.AddToTail( iTempCount );
-		FETCH_STEAM_STATS( CFmtStr( "player_count.%d.missions", i ), iTempCount );
+		FETCH_STEAM_STATS( CFmtStr( "player_count.%d.missions", i + 1 ), iTempCount );
 		m_MissionPlayerCounts.AddToTail( iTempCount );
 	}
 
 	// Get difficulty counts
-	for ( i = 0; i < 5; ++i )
+	for ( int i = 0; i < 5; i++ )
 	{
 		int32 iTempCount;
 		FETCH_STEAM_STATS( CFmtStr( "%s.games.total", g_szDifficulties[i] ), iTempCount );
@@ -735,9 +741,9 @@ void CASW_Steamstats::PrepStatsForSend( CASW_Player *pPlayer )
 	int iPrimaryIndex = GetDebriefStats()->GetStartingPrimaryEquip( iMarineIndex );
 	int iSecondaryIndex = GetDebriefStats()->GetStartingSecondaryEquip( iMarineIndex );
 	int iExtraIndex = GetDebriefStats()->GetStartingExtraEquip( iMarineIndex );
-	CASW_EquipItem *pPrimary = ASWEquipmentList()->GetRegular( iPrimaryIndex );
-	CASW_EquipItem *pSecondary = ASWEquipmentList()->GetRegular( iSecondaryIndex );
-	CASW_EquipItem *pExtra = ASWEquipmentList()->GetExtra( iExtraIndex );
+	CASW_EquipItem *pPrimary = g_ASWEquipmentList.GetRegular( iPrimaryIndex );
+	CASW_EquipItem *pSecondary = g_ASWEquipmentList.GetRegular( iSecondaryIndex );
+	CASW_EquipItem *pExtra = g_ASWEquipmentList.GetExtra( iExtraIndex );
 
 	Assert( pPrimary && pSecondary && pExtra );
 
@@ -851,15 +857,13 @@ void CASW_Steamstats::PrepStatsForSend( CASW_Player *pPlayer )
 		}
 	}
 
+	ReactiveDropInventory::CheckPlaytimeItemGenerators( MarineProfileList()->GetProfile( iMarineProfileIndex )->GetMarineClass() );
+
 	char szBetaBranch[256]{};
 	if ( SteamInventory() && SteamApps()->GetCurrentBetaName( szBetaBranch, sizeof( szBetaBranch ) ) && !V_stricmp( szBetaBranch, "beta" ) )
 	{
 		// beta tester medal
-		SteamInventoryResult_t hResult{ k_SteamInventoryResultInvalid };
-		if ( SteamInventory()->AddPromoItem( &hResult, 13 ) )
-		{
-			SteamInventory()->DestroyResult( hResult );
-		}
+		ReactiveDropInventory::AddPromoItem( 13 );
 	}
 }
 
@@ -1228,7 +1232,7 @@ bool WeaponStats_t::FetchWeaponStats( CSteamID playerSteamID, const char *szClas
 
 void WeaponStats_t::PrepStatsForSend( CASW_Player *pPlayer )
 {
-	if( !GetDebriefStats() || !ASWGameResource() || !ASWEquipmentList() )
+	if( !GetDebriefStats() || !ASWGameResource() )
 		return;
 
 	// Check to see if the weapon is in the debrief stats
