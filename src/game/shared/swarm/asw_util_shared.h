@@ -80,13 +80,13 @@ float UTIL_ASW_CalcFastDoorHackTime(int iNumRows, int iNumColumns, int iNumWires
 	class CASW_ViewNPCRecipientFilter : public CRecipientFilter
 	{
 	public:
-		CASW_ViewNPCRecipientFilter( CASW_Inhabitable_NPC *pNPC );
+		CASW_ViewNPCRecipientFilter( CASW_Inhabitable_NPC *pNPC, bool bSendToRecorders = true );
 	};
 #else
 	bool UTIL_ASW_ClientsideGib(C_BaseAnimating* pEnt);
 	CNewParticleEffect *UTIL_ASW_CreateFireEffect( C_BaseEntity *pEntity );
 	void UTIL_ASW_ClientFloatingDamageNumber( const CTakeDamageInfo &info );
-	void UTIL_ASW_ParticleDamageNumber( C_BaseEntity *pEnt, Vector vecPos, int iDamage, int iDmgCustom, float flScale, bool bRandomVelocity );
+	HPARTICLEFFECT UTIL_ASW_ParticleDamageNumber( C_BaseEntity *pEnt, Vector vecPos, int iDamage, int iDmgCustom, float flScale, bool bRandomVelocity );
 #endif
 
 void TryLocalize( const char *token, wchar_t *unicode, int unicodeBufferSizeInBytes );

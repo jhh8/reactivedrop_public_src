@@ -1612,7 +1612,7 @@ int CASW_Marine::OnTakeDamage_Alive( const CTakeDamageInfo &info )
 
 	int iPreDamageHealth = GetHealth();
 	CASW_GameStats.Event_MarineTookDamage( this, newInfo );
-	int result = CAI_PlayerAlly::OnTakeDamage_Alive( newInfo ); // skip inhabitable NPC
+	int result = BaseClass::OnTakeDamage_Alive( newInfo );
 	int iDamageTaken = MAX( iPreDamageHealth, 0 ) - MAX( GetHealth(), 0 );
 
 	if (asw_debug_marine_damage.GetBool() && result > 0)
@@ -1708,6 +1708,7 @@ int CASW_Marine::OnTakeDamage_Alive( const CTakeDamageInfo &info )
 			CASW_ViewNPCRecipientFilter user( this );
 			UserMessageBegin( user, "Damage" );
 			WRITE_SHORT( clamp( (int)newInfo.GetDamage(), 0, 32000 ) );
+			WRITE_ENTITY( entindex() );
 			WRITE_LONG( newInfo.GetDamageType() );
 			// Tell the client whether they should show it in the indicator
 			if ( !(newInfo.GetDamageType() & (DMG_DROWN | DMG_FALL | DMG_BURN | DMG_INFEST | DMG_RADIATION) ) )
@@ -1756,7 +1757,7 @@ int CASW_Marine::OnTakeDamage_Alive( const CTakeDamageInfo &info )
 			}
 
 			// this is the sound that's played for the local player only
-			CASW_ViewNPCRecipientFilter localfilter( this );
+			CASW_ViewNPCRecipientFilter localfilter( this, false );
 			localfilter.MakeReliable();
 
 			// this is the sound that's played for all other players, but the local player
