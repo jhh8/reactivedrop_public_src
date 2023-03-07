@@ -2,6 +2,10 @@
 #include "rd_inventory_shared.h"
 #include "rd_lobby_utils.h"
 #include "asw_util_shared.h"
+#include "asw_equipment_list.h"
+#include "asw_deathmatch_mode_light.h"
+#include "asw_gamerules.h"
+#include "GameEventListener.h"
 #include "fmtstr.h"
 #include "jsmn.h"
 #include <ctime>
@@ -12,30 +16,65 @@
 #include <vgui_controls/Controls.h>
 #include <vgui_controls/RichText.h>
 #include "lodepng.h"
-#include "asw_gamerules.h"
+#include "c_asw_player.h"
+#include "c_asw_marine_resource.h"
+#include "c_asw_marine.h"
+#include "c_asw_weapon.h"
+#include "c_asw_sentry_base.h"
+#include "c_asw_game_resource.h"
 #include "asw_equipment_list.h"
 #include "rd_workshop.h"
 #include "rd_missions_shared.h"
 #include "asw_deathmatch_mode_light.h"
 #include "gameui/swarm/vitemshowcase.h"
 #include "filesystem.h"
+#include "c_user_message_register.h"
+#define CASW_Sentry_Base C_ASW_Sentry_Base
 #else
 #include "asw_player.h"
+#include "asw_marine_resource.h"
+#include "asw_marine.h"
+#include "asw_weapon.h"
+#include "asw_sentry_base.h"
+#include "asw_sentry_top.h"
+#include "asw_game_resource.h"
 #endif
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
 
-#ifdef GAME_DLL
+COMPILE_TIME_ASSERT( RD_STEAM_INVENTORY_EQUIP_SLOT_FIRST_MARINE + ASW_NUM_MARINE_PROFILES == RD_STEAM_INVENTORY_EQUIP_SLOT_FIRST_WEAPON );
+COMPILE_TIME_ASSERT( RD_STEAM_INVENTORY_EQUIP_SLOT_FIRST_WEAPON + ASW_NUM_EQUIP_REGULAR == RD_STEAM_INVENTORY_EQUIP_SLOT_FIRST_EXTRA );
+COMPILE_TIME_ASSERT( RD_STEAM_INVENTORY_EQUIP_SLOT_FIRST_EXTRA + ASW_NUM_EQUIP_EXTRA == RD_NUM_STEAM_INVENTORY_EQUIP_SLOTS );
+#pragma warning(push)
+#pragma warning(disable: 4130) // we're comparing string literals, but if the comparison fails due to memory weirdness, it'll fail at compile time, so it's fine
+COMPILE_TIME_ASSERT( ReactiveDropInventory::g_InventorySlotNames[RD_STEAM_INVENTORY_EQUIP_SLOT_FIRST_MEDAL] == "medal" );
+COMPILE_TIME_ASSERT( ReactiveDropInventory::g_InventorySlotNames[RD_STEAM_INVENTORY_EQUIP_SLOT_FIRST_MARINE] == "marine0" );
+COMPILE_TIME_ASSERT( ReactiveDropInventory::g_InventorySlotNames[RD_STEAM_INVENTORY_EQUIP_SLOT_FIRST_WEAPON] == "weapon0" );
+COMPILE_TIME_ASSERT( ReactiveDropInventory::g_InventorySlotNames[RD_STEAM_INVENTORY_EQUIP_SLOT_FIRST_EXTRA] == "extra0" );
+#pragma warning(pop)
+
+#ifdef CLIENT_DLL
+ConVar rd_debug_inventory_dynamic_props( "cl_debug_inventory_dynamic_props", "0", FCVAR_NONE, "print debugging messages about dynamic property updates" );
+#else
 extern ConVar rd_dedicated_server_language;
+ConVar rd_debug_inventory_dynamic_props( "sv_debug_inventory_dynamic_props", "0", FCVAR_NONE, "print debugging messages about dynamic property updates" );
 #endif
 
+class CSteamItemIcon;
+
 static CUtlMap<SteamItemDef_t, ReactiveDropInventory::ItemDef_t *> s_ItemDefs( DefLessFunc( SteamItemDef_t ) );
+static CUtlStringMap<CSteamItemIcon *> s_ItemIcons( false );
 static KeyValues *s_pItemDefCache = NULL;
 static bool s_bLoadedItemDefs = false;
 
-static class CRD_Inventory_Manager final : public CAutoGameSystem
+static bool DynamicPropertyAllowsArbitraryValues( const char *szPropertyName )
+{
+	return false;
+}
+
+static class CRD_Inventory_Manager final : public CAutoGameSystem, public CGameEventListener
 {
 public:
 	CRD_Inventory_Manager() : CAutoGameSystem( "CRD_Inventory_Manager" )
@@ -61,18 +100,15 @@ public:
 				pInventory->DestroyResult( m_PlaytimeItemGeneratorResult[i] );
 			}
 			pInventory->DestroyResult( m_InspectItemResult );
-			if ( m_pPreparingEquipNotification )
+			pInventory->DestroyResult( m_ExchangeItemsResult );
+			pInventory->DestroyResult( m_DynamicPropertyUpdateResult );
+			pInventory->DestroyResult( m_PreparingEquipNotification );
+			FOR_EACH_VEC( m_PendingEquipSend, i )
 			{
-				if ( KeyValues *pPending = m_pPreparingEquipNotification->FindKey( "pending" ) )
-				{
-					FOR_EACH_VALUE( pPending, pResult )
-					{
-						pInventory->DestroyResult( pResult->GetInt() );
-					}
-				}
+				m_PendingEquipSend[i]->deleteThis();
 
-				m_pPreparingEquipNotification->deleteThis();
 			}
+			m_PendingEquipSend.Purge();
 #endif
 		}
 	}
@@ -96,6 +132,15 @@ public:
 		{
 			Warning( "Failed to load inventory item definitions!\n" );
 		}
+
+		ListenForGameEvent( "mission_success" );
+		ListenForGameEvent( "mission_failed" );
+		ListenForGameEvent( "asw_mission_restart" );
+		ListenForGameEvent( "fast_hack_success" );
+		ListenForGameEvent( "entity_frozen" );
+		ListenForGameEvent( "marine_infested_cured" );
+		ListenForGameEvent( "marine_extinguished" );
+		ListenForGameEvent( "marine_healed" );
 
 #ifdef CLIENT_DLL
 		pInventory->GetAllItems( &m_GetFullInventoryForCacheResult );
@@ -128,10 +173,7 @@ public:
 		}
 
 #ifdef CLIENT_DLL
-		for ( int i = 0; i < RD_NUM_STEAM_INVENTORY_EQUIP_SLOTS; i++ )
-		{
-			OnEquippedItemChanged( ReactiveDropInventory::g_InventorySlotNames[i], false );
-		}
+		QueueSendEquipNotification( true );
 #endif
 	}
 
@@ -151,97 +193,176 @@ public:
 		}
 
 #ifdef CLIENT_DLL
-		if ( m_pPreparingEquipNotification )
+		pInventory->DestroyResult( m_PreparingEquipNotification );
+		m_PreparingEquipNotification = k_SteamInventoryResultInvalid;
+		FOR_EACH_VEC( m_PendingEquipSend, i )
 		{
-			if ( KeyValues *pPending = m_pPreparingEquipNotification->FindKey( "pending" ) )
-			{
-				FOR_EACH_VALUE( pPending, pResult )
-				{
-					pInventory->DestroyResult( pResult->GetInt() );
-				}
-			}
+			m_PendingEquipSend[i]->deleteThis();
 
-			m_pPreparingEquipNotification->deleteThis();
-			m_pPreparingEquipNotification = NULL;
 		}
+		m_PendingEquipSend.Purge();
+
+		CommitDynamicProperties();
+
+		m_LocalEquipCache.PurgeAndDeleteElements();
 #endif
 	}
 
 #ifdef CLIENT_DLL
-	void OnEquippedItemChanged( const char *szSlot, bool bSendIfEmpty = true )
+	void QueueSendEquipNotification( bool bForce = false )
 	{
+		if ( !bForce && ( m_PreparingEquipNotification != k_SteamInventoryResultInvalid || !engine->IsInGame() ) )
+		{
+			return;
+		}
+
+		if ( ASWGameRules() && ASWGameRules()->GetGameState() == ASW_GS_INGAME )
+		{
+			// we'll try again on map load or instant restart
+			return;
+		}
+
 		ISteamInventory *pInventory = SteamInventory();
-
-		ConVarRef cv{ CFmtStr{ "rd_equipped_%s", szSlot } };
-		if ( !pInventory || !cv.IsValid() || !engine->IsConnected() || engine->IsPlayingDemo() )
+		Assert( pInventory );
+		if ( !pInventory )
+		{
 			return;
-
-		SteamItemInstanceID_t id = strtoull( cv.GetString(), NULL, 10 );
-
-		if ( !s_bLoadedItemDefs && engine->IsClientLocalToActiveServer() && gpGlobals->maxClients == 1 )
-		{
-			// We're in singleplayer and we can't talk to the Steam Inventory Service server.
-			// Send a request to use our cached inventory so we can use items while offline.
-			// Still attempt to get the item data the normal way, just in case we end up being able to contact the API.
-
-			KeyValues *pKV = new KeyValues{ "EquippedItemsCached" };
-			pKV->SetUint64( szSlot, id );
-			engine->ServerCmdKeyValues( pKV );
 		}
 
-		if ( m_pPreparingEquipNotification )
+		pInventory->DestroyResult( m_PreparingEquipNotification );
+		m_PreparingEquipNotification = k_SteamInventoryResultInvalid;
+		FOR_EACH_VEC( m_PendingEquipSend, i )
 		{
-			KeyValues *pPending = m_pPreparingEquipNotification->FindKey( CFmtStr{ "pending/%s", szSlot } );
-			if ( pPending )
-			{
-				pInventory->DestroyResult( pPending->GetInt() );
-				m_pPreparingEquipNotification->FindKey( "pending" )->RemoveSubKey( pPending );
-				pPending->deleteThis();
-			}
+			m_PendingEquipSend[i]->deleteThis();
 		}
+		m_PendingEquipSend.Purge();
+
+		CUtlVector<SteamItemInstanceID_t> ItemIDs;
+		for ( int i = 0; i < RD_NUM_STEAM_INVENTORY_EQUIP_SLOTS; i++ )
+		{
+			const char *szSlot = ReactiveDropInventory::g_InventorySlotNames[i];
+			ConVarRef cv{ CFmtStr{ "rd_equipped_%s", szSlot } };
+			Assert( cv.IsValid() );
+
+			SteamItemInstanceID_t id = strtoull( cv.GetString(), NULL, 10 );
+			if ( id != 0 && id != k_SteamItemInstanceIDInvalid )
+				ItemIDs.AddToTail( id );
+		}
+
+		if ( ItemIDs.Count() == 0 )
+			SendEquipNotification();
 		else
-		{
-			m_pPreparingEquipNotification = new KeyValues{ "EquippedItems" };
-		}
-
-		if ( id == 0 || id == k_SteamItemInstanceIDInvalid )
-		{
-			if ( !bSendIfEmpty )
-				return;
-
-			m_pPreparingEquipNotification->SetString( szSlot, "" );
-			CheckSendEquipNotification();
-			return;
-		}
-
-		SteamInventoryResult_t hResult;
-		if ( pInventory->GetItemsByID( &hResult, &id, 1 ) )
-		{
-			m_pPreparingEquipNotification->SetInt( CFmtStr{ "pending/%s", szSlot }, hResult );
-		}
+			pInventory->GetItemsByID( &m_PreparingEquipNotification, ItemIDs.Base(), ItemIDs.Count() );
 	}
 
-	void CheckSendEquipNotification()
+	void SendEquipNotification()
 	{
-		if ( !m_pPreparingEquipNotification )
+		COMPILE_TIME_ASSERT( RD_NUM_STEAM_INVENTORY_EQUIP_SLOTS < 255 );
+
+		if ( m_PreparingEquipNotification == k_SteamInventoryResultInvalid )
+		{
+			byte allZeroes[4 + RD_NUM_STEAM_INVENTORY_EQUIP_SLOTS];
+			V_memset( allZeroes, 0, sizeof( allZeroes ) );
+
+			*reinterpret_cast< CRC32_t * >( &allZeroes[0] ) = CRC32_ProcessSingleBuffer( &allZeroes[4], RD_NUM_STEAM_INVENTORY_EQUIP_SLOTS );
+
+			SendEquipNotification( allZeroes, sizeof( allZeroes ) );
+
+			return;
+		}
+
+		ISteamInventory *pInventory = SteamInventory();
+		Assert( pInventory );
+		if ( !pInventory )
 		{
 			return;
 		}
 
-		KeyValues *pPending = m_pPreparingEquipNotification->FindKey( "pending" );
-		if ( pPending && !pPending->GetFirstSubKey() )
+		EResult eResult = pInventory->GetResultStatus( m_PreparingEquipNotification );
+		if ( eResult != k_EResultOK )
 		{
-			m_pPreparingEquipNotification->RemoveSubKey( pPending );
-			pPending->deleteThis();
-			pPending = NULL;
-		}
+			Warning( "Getting snapshot of equipped items to send to server failed: %d %s\n", eResult, UTIL_RD_EResultToString( eResult ) );
 
-		if ( !pPending )
-		{
-			engine->ServerCmdKeyValues( m_pPreparingEquipNotification );
-			m_pPreparingEquipNotification = NULL;
+			pInventory->DestroyResult( m_PreparingEquipNotification );
+			m_PreparingEquipNotification = k_SteamInventoryResultInvalid;
+
 			return;
 		}
+
+		uint32_t nSize{};
+		pInventory->GetResultItems( m_PreparingEquipNotification, NULL, &nSize );
+		m_LocalEquipCache.PurgeAndDeleteElements();
+		m_LocalEquipCache.EnsureCapacity( int( nSize ) );
+
+		for ( uint32_t i = 0; i < nSize; i++ )
+		{
+			m_LocalEquipCache.AddToTail( new ReactiveDropInventory::ItemInstance_t{ m_PreparingEquipNotification, i } );
+		}
+
+		nSize = 0;
+		pInventory->SerializeResult( m_PreparingEquipNotification, NULL, &nSize );
+		CUtlMemory<byte> buf{ 0, int( 4 + RD_NUM_STEAM_INVENTORY_EQUIP_SLOTS + nSize ) };
+
+		byte *pIndex = buf.Base() + 4;
+
+		for ( int i = 0; i < RD_NUM_STEAM_INVENTORY_EQUIP_SLOTS; i++ )
+		{
+			const char *szSlot = ReactiveDropInventory::g_InventorySlotNames[i];
+			ConVarRef cv{ CFmtStr{ "rd_equipped_%s", szSlot } };
+			Assert( cv.IsValid() );
+
+			*pIndex = 0;
+
+			SteamItemInstanceID_t id = strtoull( cv.GetString(), NULL, 10 );
+			if ( id != 0 && id != k_SteamItemInstanceIDInvalid )
+			{
+				FOR_EACH_VEC( m_LocalEquipCache, j )
+				{
+					if ( m_LocalEquipCache[j]->ItemID == id )
+					{
+						*pIndex = j + 1;
+						break;
+					}
+				}
+			}
+
+			pIndex++;
+		}
+
+		pInventory->SerializeResult( m_PreparingEquipNotification, pIndex, &nSize );
+
+		*reinterpret_cast< CRC32_t * >( buf.Base() ) = CRC32_ProcessSingleBuffer( buf.Base() + 4, buf.Count() - 4 );
+
+		pInventory->DestroyResult( m_PreparingEquipNotification );
+		m_PreparingEquipNotification = k_SteamInventoryResultInvalid;
+
+		SendEquipNotification( buf.Base(), buf.Count() );
+	}
+
+	void SendEquipNotification( const byte *pData, int nLength )
+	{
+		Assert( m_PendingEquipSend.Count() == 0 );
+		Assert( nLength <= RD_EQUIPPED_ITEMS_NOTIFICATION_WORST_CASE_SIZE );
+		m_EquipSendParity++;
+		Assert( m_EquipSendParity > 0 );
+		char szHex[RD_EQUIPPED_ITEMS_NOTIFICATION_PAYLOAD_SIZE_PER_PACKET * 2 + 1]{};
+		for ( int i = 0; i < nLength; i += RD_EQUIPPED_ITEMS_NOTIFICATION_PAYLOAD_SIZE_PER_PACKET )
+		{
+			V_binarytohex( pData + i, MIN( nLength - i, RD_EQUIPPED_ITEMS_NOTIFICATION_PAYLOAD_SIZE_PER_PACKET ), szHex, sizeof( szHex ) );
+
+			KeyValues *pKV = new KeyValues( "EquippedItems" );
+			pKV->SetInt( "i", i * 2 );
+			pKV->SetInt( "t", nLength * 2 );
+			pKV->SetInt( "e", m_EquipSendParity );
+			pKV->SetString( "m", szHex );
+
+			if ( i == 0 )
+				engine->ServerCmdKeyValues( pKV );
+			else
+				m_PendingEquipSend.Insert( pKV );
+		}
+
+		DevMsg( 3, "Split equipped items notification into %d chunks (%d bytes total payload)\n", m_PendingEquipSend.Count() + 1, nLength );
 	}
 
 	void HandleItemDropResult( SteamInventoryResult_t &hResult )
@@ -427,7 +548,534 @@ public:
 	}
 
 	CUtlVector<SteamItemDef_t> m_HighOwnedInventoryDefIDs;
+
+	struct PendingDynamicPropertyUpdate_t
+	{
+		SteamItemInstanceID_t ItemInstanceID{ k_SteamItemInstanceIDInvalid };
+		SteamItemDef_t ItemDefID{};
+		int PropertyIndex{};
+		int64_t NewValue{};
+	};
+	CUtlVector<PendingDynamicPropertyUpdate_t> m_PendingDynamicPropertyUpdates{};
+	SteamInventoryResult_t m_DynamicPropertyUpdateResult{ k_SteamInventoryResultInvalid };
+	bool m_bWantExtraDynamicPropertyCommit{};
+
+	void CommitDynamicProperties()
+	{
+		if ( m_PendingDynamicPropertyUpdates.Count() == 0 )
+		{
+			if ( rd_debug_inventory_dynamic_props.GetBool() )
+			{
+				Msg( "[C] Not committing dynamic property update (no properties changed)\n" );
+			}
+
+			return;
+		}
+
+		if ( m_DynamicPropertyUpdateResult != k_SteamInventoryResultInvalid )
+		{
+			if ( rd_debug_inventory_dynamic_props.GetBool() )
+			{
+				Msg( "[C] Not committing dynamic property update (%s)\n", m_bWantExtraDynamicPropertyCommit ? "request in flight and repeat already queued" : "request in flight, queueing repeat" );
+			}
+
+			m_bWantExtraDynamicPropertyCommit = true;
+
+			return;
+		}
+
+		ISteamInventory *pInventory = SteamInventory();
+		Assert( pInventory );
+		if ( !pInventory )
+		{
+			Warning( "Cannot commit dynamic property updates: no inventory API\n" );
+			return;
+		}
+
+		SteamInventoryUpdateHandle_t hUpdate = pInventory->StartUpdateProperties();
+
+		if ( rd_debug_inventory_dynamic_props.GetBool() )
+		{
+			Msg( "[C] Committing dynamic property update with %d changed properties (handle %016llx)\n", m_PendingDynamicPropertyUpdates.Count(), hUpdate );
+		}
+
+		FOR_EACH_VEC( m_PendingDynamicPropertyUpdates, i )
+		{
+			const ReactiveDropInventory::ItemDef_t *pDef = ReactiveDropInventory::GetItemDef( m_PendingDynamicPropertyUpdates[i].ItemDefID );
+			const char *szProperty = pDef->CompressedDynamicProps[m_PendingDynamicPropertyUpdates[i].PropertyIndex];
+			if ( rd_debug_inventory_dynamic_props.GetBool() )
+			{
+				Msg( "[C] Setting item %llu (#%d:%s) property %d:%s value to %lld\n", m_PendingDynamicPropertyUpdates[i].ItemInstanceID, m_PendingDynamicPropertyUpdates[i].ItemDefID, pDef->Name.Get(),
+					m_PendingDynamicPropertyUpdates[i].PropertyIndex, szProperty, m_PendingDynamicPropertyUpdates[i].NewValue );
+			}
+
+			bool ok = pInventory->SetProperty( hUpdate, m_PendingDynamicPropertyUpdates[i].ItemInstanceID, szProperty, m_PendingDynamicPropertyUpdates[i].NewValue );
+			Assert( ok );
+			if ( !ok )
+			{
+				Warning( "ISteamInventory::SetProperty returned false\n" );
+			}
+		}
+
+		bool ok = pInventory->SubmitUpdateProperties( hUpdate, &m_DynamicPropertyUpdateResult );
+		Assert( ok );
+		if ( !ok )
+		{
+			Warning( "ISteamInventory::SubmitUpdateProperties returned false\n" );
+		}
+
+		m_PendingDynamicPropertyUpdates.Purge();
+	}
 #endif
+
+	void IncrementStrangePropertyOnStartingItems( SteamItemDef_t iAccessoryID, int64_t iAmount, int iPropertyIndex = 0, bool bRelative = true, bool bAllowCheating = false )
+	{
+		Assert( iPropertyIndex >= 0 );
+
+		CASW_Game_Resource *pGameResource = ASWGameResource();
+		if ( !pGameResource )
+		{
+			if ( rd_debug_inventory_dynamic_props.GetBool() )
+			{
+				Msg( "[%c] Cannot increment property on starting items: no game resource\n", IsClientDll() ? 'C' : 'S' );
+			}
+
+			return;
+		}
+
+		for ( int i = 1; i <= ( IsClientDll() ? 1 : gpGlobals->maxClients ); i++ )
+		{
+#ifdef CLIENT_DLL
+			C_ASW_Player *pPlayer = C_ASW_Player::GetLocalASWPlayer();
+#else
+			CASW_Player *pPlayer = ToASW_Player( UTIL_PlayerByIndex( i ) );
+#endif
+			if ( !pPlayer )
+				continue;
+
+			CASW_Marine_Resource *pMR = pGameResource->GetFirstMarineResourceForPlayer( pPlayer );
+			if ( !pMR || pMR->m_OriginalCommander.Get() != pPlayer || ( !pMR->IsInhabited() && pMR->GetHealthPercent() > 0 ) )
+				continue;
+
+#ifdef CLIENT_DLL
+			CRD_ItemInstance &suitInstance = pMR->m_EquippedSuit;
+#else
+			CRD_ItemInstance &suitInstance = pPlayer->m_EquippedItemData[RD_STEAM_INVENTORY_EQUIP_SLOT_FIRST_MARINE + pMR->GetProfileIndex()];
+#endif
+
+			ModifyAccessoryDynamicPropValue( suitInstance, iAccessoryID, iPropertyIndex, iAmount, bRelative, bAllowCheating );
+
+			for ( int j = 0; j < ASW_NUM_INVENTORY_SLOTS; j++ )
+			{
+#ifdef CLIENT_DLL
+				CRD_ItemInstance &weaponInstance = pMR->m_StartingEquipWeapons[j];
+#else
+				CASW_EquipItem *pEquip = g_ASWEquipmentList.GetItemForSlot( j, pMR->m_iInitialWeaponsInSlots[j] );
+				if ( !pEquip || pEquip->m_iInventoryIndex == -1 )
+					continue;
+				CRD_ItemInstance &weaponInstance = pPlayer->m_EquippedItemData[pEquip->m_iInventoryIndex];
+#endif
+
+				ModifyAccessoryDynamicPropValue( weaponInstance, iAccessoryID, iPropertyIndex, iAmount, bRelative, bAllowCheating );
+			}
+		}
+	}
+
+	void IncrementStrangePropertyOnEquippedItems( CASW_Inhabitable_NPC *pNPC, SteamItemDef_t iAccessoryID, int64_t iAmount, int iPropertyIndex = 0, bool bRelative = true, bool bAllowCheating = false )
+	{
+		Assert( pNPC );
+		if ( !pNPC || !pNPC->IsInhabited() || !pNPC->GetCommander() )
+			return;
+
+#ifdef CLIENT_DLL
+		if ( !pNPC->GetCommander()->IsLocalPlayer() )
+			return;
+#endif
+
+		if ( CASW_Marine *pMarine = CASW_Marine::AsMarine( pNPC ) )
+		{
+			CASW_Marine_Resource *pMR = pMarine->GetMarineResource();
+			if ( pMR && pMR->m_OriginalCommander.Get() == pMR->m_Commander.Get() )
+			{
+#ifdef CLIENT_DLL
+				CRD_ItemInstance &suitInstance = pMR->m_EquippedSuit;
+#else
+				CRD_ItemInstance &suitInstance = pMR->m_OriginalCommander->m_EquippedItemData[RD_STEAM_INVENTORY_EQUIP_SLOT_FIRST_MARINE + pMR->GetProfileIndex()];
+#endif
+
+				ModifyAccessoryDynamicPropValue( suitInstance, iAccessoryID, iPropertyIndex, iAmount, bRelative, bAllowCheating );
+			}
+		}
+
+		AccountID_t iRequiredAccount = pNPC->GetCommander()->GetSteamID().GetAccountID();
+
+		for ( int i = 0; i < MAX_WEAPONS; i++ )
+		{
+			CASW_Weapon *pWeapon = pNPC->GetASWWeapon( i );
+			if ( pWeapon && pWeapon->m_iOriginalOwnerSteamAccount == iRequiredAccount )
+			{
+#ifdef CLIENT_DLL
+				CRD_ItemInstance &weaponInstance = pWeapon->m_InventoryItemData;
+#else
+				if ( pWeapon->m_iInventoryEquipSlotIndex == -1 )
+					continue;
+				CRD_ItemInstance &weaponInstance = pWeapon->m_hOriginalOwnerPlayer->m_EquippedItemData[pWeapon->m_iInventoryEquipSlotIndex];
+#endif
+
+				ModifyAccessoryDynamicPropValue( weaponInstance, iAccessoryID, iPropertyIndex, iAmount, bRelative, bAllowCheating );
+			}
+		}
+	}
+
+	template<typename Weapon_t>
+	void IncrementStrangePropertyOnWeaponAndGlobals( CASW_Inhabitable_NPC *pNPC, Weapon_t *pWeapon, SteamItemDef_t iAccessoryID, int64_t iAmount, int iPropertyIndex = 0, bool bRelative = true, bool bAllowCheating = false, bool bAllowBorrowed = false )
+	{
+		Assert( pNPC );
+		if ( !pNPC || !pNPC->IsInhabited() || !pNPC->GetCommander() )
+			return;
+
+#ifdef CLIENT_DLL
+		if ( !bAllowBorrowed && !pNPC->GetCommander()->IsLocalPlayer() )
+			return;
+#endif
+
+		if ( CASW_Marine *pMarine = CASW_Marine::AsMarine( pNPC ) )
+		{
+			CASW_Marine_Resource *pMR = pMarine->GetMarineResource();
+			if ( pMR && pMR->m_OriginalCommander.Get() == pMR->m_Commander.Get()
+#ifdef CLIENT_DLL
+				&& pMR->m_OriginalCommander->IsLocalPlayer()
+#endif
+				)
+			{
+#ifdef CLIENT_DLL
+				CRD_ItemInstance &suitInstance = pMR->m_EquippedSuit;
+#else
+				CRD_ItemInstance &suitInstance = pMR->m_OriginalCommander->m_EquippedItemData[RD_STEAM_INVENTORY_EQUIP_SLOT_FIRST_MARINE + pMR->GetProfileIndex()];
+#endif
+
+				ModifyAccessoryDynamicPropValue( suitInstance, iAccessoryID, iPropertyIndex, iAmount, bRelative, bAllowCheating );
+			}
+		}
+
+		AccountID_t iRequiredAccount = pNPC->GetCommander()->GetSteamID().GetAccountID();
+		if ( pWeapon && ( bAllowBorrowed || pWeapon->m_iOriginalOwnerSteamAccount == iRequiredAccount )
+#ifdef CLIENT_DLL
+			&& SteamUser() && pWeapon->m_iOriginalOwnerSteamAccount == SteamUser()->GetSteamID().GetAccountID()
+#endif
+			)
+		{
+#ifdef CLIENT_DLL
+			CRD_ItemInstance &weaponInstance = pWeapon->m_InventoryItemData;
+#else
+			if ( pWeapon->m_iInventoryEquipSlotIndex == -1 )
+				return;
+			CRD_ItemInstance &weaponInstance = pWeapon->m_hOriginalOwnerPlayer->m_EquippedItemData[pWeapon->m_iInventoryEquipSlotIndex];
+#endif
+
+			ModifyAccessoryDynamicPropValue( weaponInstance, iAccessoryID, iPropertyIndex, iAmount, bRelative, bAllowCheating );
+		}
+	}
+
+	void IncrementStrangePropertiesForWeapon( CASW_Inhabitable_NPC *pNPC, CBaseEntity *pWeapon, SteamItemDef_t iAccessoryID, int64_t iAmount, int iPropertyIndex = 0, bool bRelative = true )
+	{
+		if ( CASW_Weapon *pASWWeapon = dynamic_cast< CASW_Weapon * >( pWeapon ) )
+		{
+			s_RD_Inventory_Manager.IncrementStrangePropertyOnWeaponAndGlobals( pNPC, pASWWeapon, iAccessoryID, iAmount, iPropertyIndex, bRelative );
+		}
+		else if ( CASW_Sentry_Base *pSentry = dynamic_cast< CASW_Sentry_Base * >( pWeapon ) )
+		{
+			s_RD_Inventory_Manager.IncrementStrangePropertyOnWeaponAndGlobals( pNPC, pSentry, iAccessoryID, iAmount, iPropertyIndex, bRelative );
+		}
+		else if ( IRD_Has_Projectile_Data *pProjectile = dynamic_cast< IRD_Has_Projectile_Data * >( pWeapon ) )
+		{
+			CRD_ProjectileData *pData = const_cast< CRD_ProjectileData * >( pProjectile->GetProjectileData() );
+			if ( pData->m_bFiredByOwner )
+			{
+				s_RD_Inventory_Manager.IncrementStrangePropertyOnWeaponAndGlobals( pNPC, pData, iAccessoryID, iAmount, iPropertyIndex, bRelative );
+			}
+		}
+#ifdef DBGFLAG_ASSERT
+		else if ( pWeapon )
+		{
+			Assert( !"Unhandled weapon type" );
+		}
+#endif
+	}
+
+	bool ModifyAccessoryDynamicPropValue( CRD_ItemInstance &instance, SteamItemDef_t iAccessoryID, int iPropertyIndex, int64_t iAmount, bool bRelative = true, bool bAllowCheating = false )
+	{
+		if ( !instance.IsSet() )
+		{
+			// no item in slot
+			return false;
+		}
+
+		if ( !bAllowCheating && ASWGameRules() && ASWGameRules()->m_bCheated )
+		{
+			// can't affect strange stats while cheating
+			return false;
+		}
+
+		if ( !s_bLoadedItemDefs )
+		{
+			if ( rd_debug_inventory_dynamic_props.GetBool() )
+			{
+				static int s_nOfflineWarnings = 0;
+				if ( s_nOfflineWarnings < 10 )
+				{
+					s_nOfflineWarnings++;
+					Msg( "[%c] Cannot modify dynamic properties in offline mode.\n", IsClientDll() ? 'C' : 'S' );
+				}
+			}
+
+			return false;
+		}
+
+		const ReactiveDropInventory::ItemDef_t *pItemDef = ReactiveDropInventory::GetItemDef( instance.m_iItemDefID );
+		const ReactiveDropInventory::ItemDef_t *pAccessoryDef = ReactiveDropInventory::GetItemDef( iAccessoryID );
+		Assert( pItemDef );
+		Assert( pAccessoryDef );
+		if ( !pItemDef || !pAccessoryDef )
+			return false;
+
+		Assert( iPropertyIndex >= 0 && iPropertyIndex < pAccessoryDef->CompressedDynamicProps.Count() );
+		const char *szPropertyName = pAccessoryDef->CompressedDynamicProps[iPropertyIndex];
+		int iCombinedIndex = iPropertyIndex;
+
+		ReactiveDropInventory::ItemInstance_t *pLocalInstance = NULL;
+#ifdef CLIENT_DLL
+		FOR_EACH_VEC( m_LocalEquipCache, i )
+		{
+			if ( m_LocalEquipCache[i]->ItemID == instance.m_iItemInstanceID )
+			{
+				pLocalInstance = m_LocalEquipCache[i];
+				break;
+			}
+		}
+		Assert( pLocalInstance );
+		if ( !pLocalInstance )
+		{
+			if ( rd_debug_inventory_dynamic_props.GetBool() )
+			{
+				Msg( "[C] Could not find local instance of item %llu '%s' for property update.\n", instance.m_iItemInstanceID, pItemDef->Name.Get() );
+			}
+
+			return false;
+		}
+#endif
+
+		if ( instance.m_iItemDefID == iAccessoryID )
+		{
+			ModifyDynamicPropValueHelper( instance, iAccessoryID, iPropertyIndex, iCombinedIndex, szPropertyName, pItemDef, pAccessoryDef, pLocalInstance, iAmount, bRelative );
+			return true;
+		}
+
+		iCombinedIndex += pItemDef->CompressedDynamicProps.Count();
+
+		FOR_EACH_VEC( instance.m_iAccessory, i )
+		{
+			if ( instance.m_iAccessory[i] == iAccessoryID )
+			{
+				ModifyDynamicPropValueHelper( instance, iAccessoryID, iPropertyIndex, iCombinedIndex, szPropertyName, pItemDef, pAccessoryDef, pLocalInstance, iAmount, bRelative );
+				return true;
+			}
+
+			if ( instance.m_iAccessory[i] )
+			{
+				const ReactiveDropInventory::ItemDef_t *pOtherAccessory = ReactiveDropInventory::GetItemDef( instance.m_iAccessory[i] );
+				Assert( pOtherAccessory );
+				if ( !pOtherAccessory )
+					return false;
+
+				iCombinedIndex += pOtherAccessory->CompressedDynamicProps.Count();
+			}
+		}
+
+		// no such accessory on item
+		return false;
+	}
+
+	void ModifyDynamicPropValueHelper( CRD_ItemInstance &instance, SteamItemDef_t iAccessoryID, int iPropertyIndex, int iCombinedIndex, const char *szPropertyName,
+		const ReactiveDropInventory::ItemDef_t *pItemDef, const ReactiveDropInventory::ItemDef_t *pAccessoryDef, ReactiveDropInventory::ItemInstance_t *pLocalInstance, int64_t iAmount, bool bRelative )
+	{
+		int64_t iCounterBefore = instance.m_nCounter[iCombinedIndex];
+#ifdef CLIENT_DLL
+		PendingDynamicPropertyUpdate_t *pUpdate = NULL;
+		FOR_EACH_VEC( m_PendingDynamicPropertyUpdates, j )
+		{
+			if ( m_PendingDynamicPropertyUpdates[j].ItemInstanceID == instance.m_iItemInstanceID && m_PendingDynamicPropertyUpdates[j].ItemDefID == iAccessoryID && m_PendingDynamicPropertyUpdates[j].PropertyIndex == iPropertyIndex )
+			{
+				pUpdate = &m_PendingDynamicPropertyUpdates[j];
+				iCounterBefore = pUpdate->NewValue;
+				break;
+			}
+		}
+		if ( !pUpdate )
+		{
+			pUpdate = &m_PendingDynamicPropertyUpdates[m_PendingDynamicPropertyUpdates.AddToTail()];
+			pUpdate->ItemInstanceID = instance.m_iItemInstanceID;
+			pUpdate->ItemDefID = iAccessoryID;
+			pUpdate->PropertyIndex = iPropertyIndex;
+			iCounterBefore = strtoll( pLocalInstance->DynamicProps[szPropertyName], NULL, 10 );
+		}
+#endif
+		int64_t iCounterAfter = iCounterBefore;
+		if ( !bRelative )
+		{
+			iCounterAfter = iAmount;
+		}
+		else if ( iCounterBefore > 0 )
+		{
+			if ( iAmount > INT64_MAX - iCounterBefore )
+				iCounterAfter = INT64_MAX;
+			else
+				iCounterAfter += iAmount;
+		}
+		else
+		{
+			if ( iAmount < INT64_MIN - iCounterBefore )
+				iCounterAfter = INT64_MIN;
+			else
+				iCounterAfter += iAmount;
+		}
+
+		if ( iAccessoryID == 5007 && iPropertyIndex == 0 ) // 5007 = Alien Kill Streak
+		{
+			int64_t iBestStreak = instance.m_nCounter[iCombinedIndex + 1];
+#ifdef CLIENT_DLL
+			bool bFoundBestStreak = false;
+			FOR_EACH_VEC( m_PendingDynamicPropertyUpdates, j )
+			{
+				if ( m_PendingDynamicPropertyUpdates[j].ItemInstanceID == instance.m_iItemInstanceID && m_PendingDynamicPropertyUpdates[j].ItemDefID == iAccessoryID && m_PendingDynamicPropertyUpdates[j].PropertyIndex == iPropertyIndex + 1 )
+				{
+					iBestStreak = pUpdate->NewValue;
+					bFoundBestStreak = true;
+					break;
+				}
+			}
+			if ( !bFoundBestStreak )
+			{
+				iBestStreak = strtoll( pLocalInstance->DynamicProps[pAccessoryDef->CompressedDynamicProps[1]], NULL, 10 );
+			}
+#endif
+
+			if ( iBestStreak < iCounterAfter )
+			{
+				ModifyAccessoryDynamicPropValue( instance, iAccessoryID, 1, iCounterAfter, false );
+			}
+		}
+
+#ifdef CLIENT_DLL
+		pLocalInstance->DynamicProps[szPropertyName] = CFmtStr( "%lld", iCounterAfter );
+		pUpdate->NewValue = iCounterAfter;
+#endif
+		instance.m_nCounter.GetForModify( iCombinedIndex ) = iCounterAfter;
+
+		if ( rd_debug_inventory_dynamic_props.GetBool() )
+		{
+			DevMsg( "[%c] Item %llu #%d '%s' dynamic property '%s' '%s' changed (%s) %+lld from %lld to %lld.\n", IsClientDll() ? 'C' : 'S', instance.m_iItemInstanceID, instance.m_iItemDefID, pItemDef->Name.Get(), pAccessoryDef->Name.Get(), szPropertyName, bRelative ? "relative" : "absolute", iAmount, iCounterBefore, iCounterAfter );
+		}
+	}
+
+	void FireGameEvent( IGameEvent *event ) override
+	{
+		if ( !ASWDeathmatchMode() )
+		{
+			if ( FStrEq( event->GetName(), "mission_success" ) )
+			{
+				IncrementStrangePropertyOnStartingItems( 5000, 1 ); // Missions
+				IncrementStrangePropertyOnStartingItems( 5001, 1 ); // Successful Missions
+				return;
+			}
+
+			if ( FStrEq( event->GetName(), "mission_failure" ) )
+			{
+				IncrementStrangePropertyOnStartingItems( 5000, 1 ); // Missions
+				return;
+			}
+
+			if ( FStrEq( event->GetName(), "fast_hack_success" ) )
+			{
+				CASW_Marine *pMarine = CASW_Marine::AsMarine( CBaseEntity::Instance( event->GetInt( "marine" ) ) );
+				if ( pMarine )
+				{
+					IncrementStrangePropertyOnEquippedItems( pMarine, 5004, 1 ); // Fast Hacks
+				}
+				return;
+			}
+
+			if ( FStrEq( event->GetName(), "entity_frozen" ) )
+			{
+				CBaseEntity *pTarget = CBaseEntity::Instance( event->GetInt( "entindex" ) );
+				CBaseEntity *pAttacker = CBaseEntity::Instance( event->GetInt( "attacker" ) );
+				CBaseEntity *pWeapon = CBaseEntity::Instance( event->GetInt( "weapon" ) );
+				if ( pTarget && pAttacker && pAttacker->IsInhabitableNPC() && pWeapon )
+				{
+					s_RD_Inventory_Manager.IncrementStrangePropertiesForWeapon( assert_cast< CASW_Inhabitable_NPC * >( pAttacker ), pWeapon, 5005, 1 ); // Enemies Frozen
+				}
+				return;
+			}
+
+			if ( FStrEq( event->GetName(), "marine_infested_cured" ) )
+			{
+				CASW_Marine *pTarget = CASW_Marine::AsMarine( CBaseEntity::Instance( event->GetInt( "entindex" ) ) );
+				CASW_Marine *pHealer = CASW_Marine::AsMarine( CBaseEntity::Instance( event->GetInt( "marine" ) ) );
+				CBaseEntity *pWeapon = CBaseEntity::Instance( event->GetInt( "weapon" ) );
+
+				if ( !pWeapon && pTarget && pTarget->IsElectrifiedArmorActive() )
+				{
+					s_RD_Inventory_Manager.IncrementStrangePropertyOnWeaponAndGlobals( pTarget, &pTarget->m_ElectrifiedArmorProjectileData, 5008, 1, 0, true, false, true ); // Infestations Cured
+				}
+				else if ( pTarget && pHealer && pWeapon )
+				{
+					s_RD_Inventory_Manager.IncrementStrangePropertiesForWeapon( pHealer, pWeapon, 5008, 1 ); // Infestations Cured
+				}
+
+				return;
+			}
+
+			if ( FStrEq( event->GetName(), "marine_extinguished" ) )
+			{
+				CASW_Marine *pTarget = CASW_Marine::AsMarine( CBaseEntity::Instance( event->GetInt( "entindex" ) ) );
+				CASW_Marine *pHealer = CASW_Marine::AsMarine( CBaseEntity::Instance( event->GetInt( "healer" ) ) );
+				CBaseEntity *pWeapon = CBaseEntity::Instance( event->GetInt( "weapon" ) );
+
+				if ( pTarget && pHealer && pWeapon )
+				{
+					s_RD_Inventory_Manager.IncrementStrangePropertiesForWeapon( pHealer, pWeapon, 5006, 1 ); // Allies Extinguished
+				}
+
+				return;
+			}
+
+			if ( FStrEq( event->GetName(), "marine_healed" ) )
+			{
+				CASW_Marine *pTarget = CASW_Marine::AsMarine( CBaseEntity::Instance( event->GetInt( "patient_entindex" ) ) );
+				CASW_Marine *pHealer = CASW_Marine::AsMarine( CBaseEntity::Instance( event->GetInt( "medic_entindex" ) ) );
+				CBaseEntity *pWeapon = CBaseEntity::Instance( event->GetInt( "weapon" ) );
+
+				if ( pTarget && pHealer && pWeapon )
+				{
+					s_RD_Inventory_Manager.IncrementStrangePropertiesForWeapon( pHealer, pWeapon, 5003, event->GetInt( "amount" ) ); // Healing
+				}
+
+				return;
+			}
+		}
+
+		if ( FStrEq( event->GetName(), "asw_mission_restart" ) )
+		{
+#ifdef CLIENT_DLL
+			if ( m_PendingDynamicPropertyUpdates.Count() )
+				CommitDynamicProperties();
+			else if ( m_DynamicPropertyUpdateResult == k_SteamInventoryResultInvalid )
+				QueueSendEquipNotification();
+#endif
+			return;
+		}
+
+	}
 
 	void DebugPrintResult( SteamInventoryResult_t hResult )
 	{
@@ -496,10 +1144,17 @@ public:
 	{
 		DevMsg( 2, "[%c] Steam Inventory result for %08x received: EResult %d (%s)\n", IsClientDll() ? 'C' : 'S', pParam->m_handle, pParam->m_result, UTIL_RD_EResultToString( pParam->m_result ) );
 
+#ifdef CLIENT_DLL
+		ISteamInventory *pInventory = SteamInventory();
+#else
+		ISteamInventory *pInventory = engine->IsDedicatedServer() ? SteamGameServerInventory() : SteamInventory();
+#endif
+		Assert( pInventory );
+
 		if ( pParam->m_handle == m_DebugPrintInventoryResult )
 		{
 			DebugPrintResult( m_DebugPrintInventoryResult );
-			SteamInventory()->DestroyResult( m_DebugPrintInventoryResult );
+			pInventory->DestroyResult( m_DebugPrintInventoryResult );
 			m_DebugPrintInventoryResult = k_SteamInventoryResultInvalid;
 
 			return;
@@ -511,8 +1166,13 @@ public:
 			HandleItemDropResult( m_PromotionalItemsResult );
 			if ( m_PromotionalItemsNext.Count() )
 			{
-				SteamInventory()->AddPromoItems( &m_PromotionalItemsResult, m_PromotionalItemsNext.Base(), m_PromotionalItemsNext.Count() );
+				pInventory->AddPromoItems( &m_PromotionalItemsResult, m_PromotionalItemsNext.Base(), m_PromotionalItemsNext.Count() );
 				m_PromotionalItemsNext.Purge();
+			}
+			else if ( m_bRequestGenericPromotionalItemsAgain )
+			{
+				pInventory->GrantPromoItems( &m_PromotionalItemsResult );
+				m_bRequestGenericPromotionalItemsAgain = false;
 			}
 
 			return;
@@ -526,11 +1186,22 @@ public:
 			}
 		}
 
+		if ( pParam->m_handle == m_ExchangeItemsResult )
+		{
+			DebugPrintResult( m_ExchangeItemsResult );
+			BaseModUI::ItemShowcase::ShowItems( m_ExchangeItemsResult, 0, -1, BaseModUI::ItemShowcase::MODE_ITEM_DROP );
+
+			pInventory->DestroyResult( m_ExchangeItemsResult );
+			m_ExchangeItemsResult = k_SteamInventoryResultInvalid;
+
+			return;
+		}
+
 		if ( pParam->m_handle == m_InspectItemResult )
 		{
 			BaseModUI::ItemShowcase::ShowItems( pParam->m_handle, 0, -1, BaseModUI::ItemShowcase::MODE_INSPECT );
 
-			SteamInventory()->DestroyResult( m_InspectItemResult );
+			pInventory->DestroyResult( m_InspectItemResult );
 			m_InspectItemResult = k_SteamInventoryResultInvalid;
 
 			return;
@@ -540,50 +1211,45 @@ public:
 		{
 			CacheUserInventory( m_GetFullInventoryForCacheResult );
 
-			SteamInventory()->DestroyResult( m_GetFullInventoryForCacheResult );
+			pInventory->DestroyResult( m_GetFullInventoryForCacheResult );
 			m_GetFullInventoryForCacheResult = k_SteamInventoryResultInvalid;
 
 			return;
 		}
 
-		if ( m_pPreparingEquipNotification )
+		if ( pParam->m_handle == m_DynamicPropertyUpdateResult )
 		{
-			if ( KeyValues *pPending = m_pPreparingEquipNotification->FindKey( "pending" ) )
+			if ( rd_debug_inventory_dynamic_props.GetBool() )
 			{
-				FOR_EACH_VALUE( pPending, pResult )
-				{
-					if ( pResult->GetInt() == pParam->m_handle )
-					{
-						ReactiveDropInventory::ItemInstance_t instance{ pParam->m_handle, 0 };
-						const ReactiveDropInventory::ItemDef_t *pDef = ReactiveDropInventory::GetItemDef( instance.ItemDefID );
-
-						if ( !pDef || pDef->ItemSlot != pResult->GetName() )
-						{
-							DevWarning( "Invalid item in slot %s\n", pResult->GetName() );
-						}
-						else
-						{
-							uint32 nEncodedSize{};
-							if ( SteamInventory()->SerializeResult( pParam->m_handle, NULL, &nEncodedSize ) )
-							{
-								CUtlMemory<byte> serializedBin{ 0, int( nEncodedSize ) };
-								if ( SteamInventory()->SerializeResult( pParam->m_handle, serializedBin.Base(), &nEncodedSize ) )
-								{
-									CUtlMemory<char> serializedHex{ 0, int( nEncodedSize * 2 + 1 ) };
-									V_binarytohex( serializedBin.Base(), serializedBin.Count(), serializedHex.Base(), serializedHex.Count() );
-
-									m_pPreparingEquipNotification->SetString( pResult->GetName(), serializedHex.Base() );
-								}
-							}
-						}
-
-						pPending->RemoveSubKey( pResult );
-						pResult->deleteThis();
-						CheckSendEquipNotification();
-						return;
-					}
-				}
+				DebugPrintResult( pParam->m_handle );
 			}
+
+			EResult eResult = pInventory->GetResultStatus( pParam->m_handle );
+
+			pInventory->DestroyResult( m_DynamicPropertyUpdateResult );
+			m_DynamicPropertyUpdateResult = k_SteamInventoryResultInvalid;
+
+			if ( m_bWantExtraDynamicPropertyCommit )
+			{
+				CommitDynamicProperties();
+				m_bWantExtraDynamicPropertyCommit = false;
+			}
+			else if ( eResult == k_EResultOK )
+			{
+				pInventory->DestroyResult( m_GetFullInventoryForCacheResult );
+				m_GetFullInventoryForCacheResult = k_SteamInventoryResultInvalid;
+
+				pInventory->GetAllItems( &m_GetFullInventoryForCacheResult );
+
+				QueueSendEquipNotification();
+			}
+		}
+
+		if ( pParam->m_handle == m_PreparingEquipNotification )
+		{
+			SendEquipNotification();
+
+			return;
 		}
 #else
 		for ( int i = 1; i <= gpGlobals->maxClients; i++ )
@@ -592,29 +1258,30 @@ public:
 			if ( !pPlayer )
 				continue;
 
-			for ( int j = 0; j < RD_NUM_STEAM_INVENTORY_EQUIP_SLOTS; j++ )
+			if ( pParam->m_handle == pPlayer->m_EquippedItemsResult )
 			{
-				if ( pPlayer->m_EquippedItems[j] == pParam->m_handle )
+				byte nIndex[RD_NUM_STEAM_INVENTORY_EQUIP_SLOTS]{};
+				V_hextobinary( static_cast< const char * >( pPlayer->m_EquippedItemsReceiving.Base() ) + 8, RD_NUM_STEAM_INVENTORY_EQUIP_SLOTS * 2, nIndex, sizeof( nIndex ) );
+
+				bool bValid = false;
+				if ( !ReactiveDropInventory::ValidateEquipItemData( bValid, pParam->m_handle, nIndex, pPlayer->GetSteamIDAsUInt64() ) )
 				{
-					bool bValid = false;
-					if ( !ReactiveDropInventory::ValidateItemData( bValid, pParam->m_handle, ReactiveDropInventory::g_InventorySlotNames[j], pPlayer->GetSteamIDAsUInt64(), true ) )
-					{
-						Assert( !"ValidateItemData failed for programmer-related reason" );
-					}
-
-					if ( bValid )
-					{
-						pPlayer->SetEquippedItemForSlot( ReactiveDropInventory::g_InventorySlotNames[j], ReactiveDropInventory::ItemInstance_t{ pParam->m_handle, 0 } );
-						return;
-					}
-
-					Warning( "Player %s item in slot %s is invalid.\n", pPlayer->GetASWNetworkID(), ReactiveDropInventory::g_InventorySlotNames[j] );
-					DebugPrintResult( pParam->m_handle );
-					ReactiveDropInventory::DecodeItemData( pPlayer->m_EquippedItems[j], "" );
-					pPlayer->ClearEquippedItemForSlot( ReactiveDropInventory::g_InventorySlotNames[j] );
-
-					return;
+					Assert( !"ValidateEquipItemData failed as 'not-ready' but we are in the ready callback!" );
 				}
+
+				for ( int j = 0; j < RD_NUM_STEAM_INVENTORY_EQUIP_SLOTS; j++ )
+				{
+					if ( nIndex[j] == 0 || !bValid )
+					{
+						pPlayer->m_EquippedItemData[j].Reset();
+					}
+					else
+					{
+						pPlayer->m_EquippedItemData[j].SetFromInstance( ReactiveDropInventory::ItemInstance_t{ pParam->m_handle, nIndex[j] - 1u } );
+					}
+				}
+
+				return;
 			}
 		}
 #endif
@@ -625,13 +1292,22 @@ public:
 #ifdef CLIENT_DLL
 	SteamInventoryResult_t m_PromotionalItemsResult{ k_SteamInventoryResultInvalid };
 	CUtlVector<SteamItemDef_t> m_PromotionalItemsNext{};
+	bool m_bRequestGenericPromotionalItemsAgain{ false };
 	SteamInventoryResult_t m_PlaytimeItemGeneratorResult[3]{ k_SteamInventoryResultInvalid, k_SteamInventoryResultInvalid, k_SteamInventoryResultInvalid };
 	SteamInventoryResult_t m_InspectItemResult{ k_SteamInventoryResultInvalid };
+	SteamInventoryResult_t m_ExchangeItemsResult{ k_SteamInventoryResultInvalid };
 	SteamInventoryResult_t m_GetFullInventoryForCacheResult{ k_SteamInventoryResultInvalid };
-	KeyValues *m_pPreparingEquipNotification{};
+	SteamInventoryResult_t m_PreparingEquipNotification{ k_SteamInventoryResultInvalid };
+	CUtlQueue<KeyValues *> m_PendingEquipSend{};
+	int m_EquipSendParity{};
+	CUtlVectorAutoPurge<ReactiveDropInventory::ItemInstance_t *> m_LocalEquipCache;
 
 	STEAM_CALLBACK( CRD_Inventory_Manager, OnSteamInventoryFullUpdate, SteamInventoryFullUpdate_t )
 	{
+		// don't write the same cache twice in a row
+		if ( pParam->m_handle == m_GetFullInventoryForCacheResult )
+			return;
+
 		CacheUserInventory( pParam->m_handle );
 	}
 #endif
@@ -655,9 +1331,26 @@ public:
 } s_RD_Inventory_Manager;
 
 #ifdef CLIENT_DLL
+void __MsgFunc_RDEquippedItemsACK( bf_read &msg )
+{
+	int iParity = msg.ReadLong();
+	Assert( s_RD_Inventory_Manager.m_EquipSendParity == iParity );
+	if ( s_RD_Inventory_Manager.m_EquipSendParity != iParity )
+		return;
+
+	Assert( s_RD_Inventory_Manager.m_PendingEquipSend.Count() != 0 );
+	if ( s_RD_Inventory_Manager.m_PendingEquipSend.Count() == 0 )
+		return;
+
+	engine->ServerCmdKeyValues( s_RD_Inventory_Manager.m_PendingEquipSend.RemoveAtHead() );
+
+	DevMsg( 3, "Sending next equipped items notification chunk (%d remain)\n", s_RD_Inventory_Manager.m_PendingEquipSend.Count() );
+}
+USER_MESSAGE_REGISTER( RDEquippedItemsACK );
+
 static void RD_Equipped_Item_Changed( IConVar *var, const char *pOldValue, float flOldValue )
 {
-	s_RD_Inventory_Manager.OnEquippedItemChanged( var->GetName() + strlen( "rd_equipped_" ) );
+	s_RD_Inventory_Manager.QueueSendEquipNotification();
 }
 ConVar rd_equipped_medal( "rd_equipped_medal", "0", FCVAR_ARCHIVE | FCVAR_HIDDEN, "Steam inventory item ID of equipped medal.", RD_Equipped_Item_Changed );
 ConVar rd_equipped_marine[ASW_NUM_MARINE_PROFILES]
@@ -671,7 +1364,7 @@ ConVar rd_equipped_marine[ASW_NUM_MARINE_PROFILES]
 	{ "rd_equipped_marine6", "0", FCVAR_ARCHIVE | FCVAR_HIDDEN, "Steam inventory item ID of equipped replacement for Bastille's suit.", RD_Equipped_Item_Changed },
 	{ "rd_equipped_marine7", "0", FCVAR_ARCHIVE | FCVAR_HIDDEN, "Steam inventory item ID of equipped replacement for Vegas's suit.", RD_Equipped_Item_Changed },
 };
-ConVar rd_equipped_weapon[ASW_FIRST_HIDDEN_EQUIP_REGULAR]
+ConVar rd_equipped_weapon[ASW_NUM_EQUIP_REGULAR]
 {
 	{ "rd_equipped_weapon0", "0", FCVAR_ARCHIVE | FCVAR_HIDDEN, "Steam inventory item ID of equipped replacement for 22A3-1 Assault Rifle.", RD_Equipped_Item_Changed },
 	{ "rd_equipped_weapon1", "0", FCVAR_ARCHIVE | FCVAR_HIDDEN, "Steam inventory item ID of equipped replacement for 22A7-Z Prototype Assault Rifle.", RD_Equipped_Item_Changed },
@@ -700,8 +1393,24 @@ ConVar rd_equipped_weapon[ASW_FIRST_HIDDEN_EQUIP_REGULAR]
 	{ "rd_equipped_weapon24", "0", FCVAR_ARCHIVE | FCVAR_HIDDEN, "Steam inventory item ID of equipped replacement for IAF Medical Amplifier Gun.", RD_Equipped_Item_Changed },
 	{ "rd_equipped_weapon25", "0", FCVAR_ARCHIVE | FCVAR_HIDDEN, "Steam inventory item ID of equipped replacement for 22A5 Heavy Assault Rifle.", RD_Equipped_Item_Changed },
 	{ "rd_equipped_weapon26", "0", FCVAR_ARCHIVE | FCVAR_HIDDEN, "Steam inventory item ID of equipped replacement for IAF Medical SMG.", RD_Equipped_Item_Changed },
+	{ "rd_equipped_weapon27", "0", FCVAR_ARCHIVE | FCVAR_HIDDEN, "Steam inventory item ID of equipped replacement for Fire Extinguisher.", RD_Equipped_Item_Changed },
+	{ "rd_equipped_weapon28", "0", FCVAR_ARCHIVE | FCVAR_HIDDEN, "Steam inventory item ID of equipped replacement for Mining Laser.", RD_Equipped_Item_Changed },
+	{ "rd_equipped_weapon29", "0", FCVAR_ARCHIVE | FCVAR_HIDDEN, "Steam inventory item ID of equipped replacement for 50CMG4-1.", RD_Equipped_Item_Changed },
+	{ "rd_equipped_weapon30", "0", FCVAR_ARCHIVE | FCVAR_HIDDEN, "Steam inventory item ID of equipped replacement for Flechette Launcher.", RD_Equipped_Item_Changed },
+	{ "rd_equipped_weapon31", "0", FCVAR_ARCHIVE | FCVAR_HIDDEN, "Steam inventory item ID of equipped replacement for Ricochet Rifle.", RD_Equipped_Item_Changed },
+	{ "rd_equipped_weapon32", "0", FCVAR_ARCHIVE | FCVAR_HIDDEN, "Steam inventory item ID of equipped replacement for IAF Ammo Bag.", RD_Equipped_Item_Changed },
+	{ "rd_equipped_weapon33", "0", FCVAR_ARCHIVE | FCVAR_HIDDEN, "Steam inventory item ID of equipped replacement for IAF Medical Satchel.", RD_Equipped_Item_Changed },
+	{ "rd_equipped_weapon34", "0", FCVAR_ARCHIVE | FCVAR_HIDDEN, "Steam inventory item ID of equipped replacement for Overwatch Standard Issue Pulse Rifle.", RD_Equipped_Item_Changed },
+#ifdef RD_7A_WEAPONS
+	{ "rd_equipped_weapon35", "0", FCVAR_ARCHIVE | FCVAR_HIDDEN, "Steam inventory item ID of equipped replacement for <<Cryo Cannon>>.", RD_Equipped_Item_Changed },
+	{ "rd_equipped_weapon36", "0", FCVAR_ARCHIVE | FCVAR_HIDDEN, "Steam inventory item ID of equipped replacement for <<Plasma Thrower>>.", RD_Equipped_Item_Changed },
+	{ "rd_equipped_weapon37", "0", FCVAR_ARCHIVE | FCVAR_HIDDEN, "Steam inventory item ID of equipped replacement for <<Hack Tool>>.", RD_Equipped_Item_Changed },
+	{ "rd_equipped_weapon38", "0", FCVAR_ARCHIVE | FCVAR_HIDDEN, "Steam inventory item ID of equipped replacement for <<Railgun Sentry>>.", RD_Equipped_Item_Changed },
+	{ "rd_equipped_weapon39", "0", FCVAR_ARCHIVE | FCVAR_HIDDEN, "Steam inventory item ID of equipped replacement for <<Energy Shield>>.", RD_Equipped_Item_Changed },
+	{ "rd_equipped_weapon40", "0", FCVAR_ARCHIVE | FCVAR_HIDDEN, "Steam inventory item ID of equipped replacement for <<Revive Tool>>.", RD_Equipped_Item_Changed },
+#endif
 };
-ConVar rd_equipped_extra[ASW_FIRST_HIDDEN_EQUIP_EXTRA]
+ConVar rd_equipped_extra[ASW_NUM_EQUIP_EXTRA]
 {
 	{ "rd_equipped_extra0", "0", FCVAR_ARCHIVE | FCVAR_HIDDEN, "Steam inventory item ID of equipped replacement for IAF Personal Healing Kit.", RD_Equipped_Item_Changed },
 	{ "rd_equipped_extra1", "0", FCVAR_ARCHIVE | FCVAR_HIDDEN, "Steam inventory item ID of equipped replacement for Hand Welder.", RD_Equipped_Item_Changed },
@@ -721,11 +1430,26 @@ ConVar rd_equipped_extra[ASW_FIRST_HIDDEN_EQUIP_EXTRA]
 	{ "rd_equipped_extra15", "0", FCVAR_ARCHIVE | FCVAR_HIDDEN, "Steam inventory item ID of equipped replacement for MNV34 Nightvision Goggles.", RD_Equipped_Item_Changed },
 	{ "rd_equipped_extra16", "0", FCVAR_ARCHIVE | FCVAR_HIDDEN, "Steam inventory item ID of equipped replacement for MTD6 Smart Bomb.", RD_Equipped_Item_Changed },
 	{ "rd_equipped_extra17", "0", FCVAR_ARCHIVE | FCVAR_HIDDEN, "Steam inventory item ID of equipped replacement for TG-05 Gas Grenades.", RD_Equipped_Item_Changed },
+	{ "rd_equipped_extra18", "0", FCVAR_ARCHIVE | FCVAR_HIDDEN, "Steam inventory item ID of equipped replacement for T75 Explosives.", RD_Equipped_Item_Changed },
+	{ "rd_equipped_extra19", "0", FCVAR_ARCHIVE | FCVAR_HIDDEN, "Steam inventory item ID of equipped replacement for Displacement 'Blink' Pack.", RD_Equipped_Item_Changed },
+	{ "rd_equipped_extra20", "0", FCVAR_ARCHIVE | FCVAR_HIDDEN, "Steam inventory item ID of equipped replacement for Short Range Assault Jets.", RD_Equipped_Item_Changed },
+	{ "rd_equipped_extra21", "0", FCVAR_ARCHIVE | FCVAR_HIDDEN, "Steam inventory item ID of equipped replacement for Swarm Bait.", RD_Equipped_Item_Changed },
+#ifdef RD_7A_WEAPONS
+	{ "rd_equipped_extra22", "0", FCVAR_ARCHIVE | FCVAR_HIDDEN, "Steam inventory item ID of equipped replacement for <<Stun Grenades>>.", RD_Equipped_Item_Changed },
+	{ "rd_equipped_extra23", "0", FCVAR_ARCHIVE | FCVAR_HIDDEN, "Steam inventory item ID of equipped replacement for <<Incendiary Grenades>>.", RD_Equipped_Item_Changed },
+	{ "rd_equipped_extra24", "0", FCVAR_ARCHIVE | FCVAR_HIDDEN, "Steam inventory item ID of equipped replacement for <<Speed Burst>>.", RD_Equipped_Item_Changed },
+	{ "rd_equipped_extra25", "0", FCVAR_ARCHIVE | FCVAR_HIDDEN, "Steam inventory item ID of equipped replacement for <<Shield Bubble>>.", RD_Equipped_Item_Changed },
+#endif
 };
 
 CON_COMMAND( rd_debug_print_inventory, "" )
 {
 	SteamInventory()->GetAllItems( &s_RD_Inventory_Manager.m_DebugPrintInventoryResult );
+}
+
+CON_COMMAND( rd_debug_inspect_entire_inventory, "inspect every item in your inventory" )
+{
+	SteamInventory()->GetAllItems( &s_RD_Inventory_Manager.m_InspectItemResult );
 }
 
 CON_COMMAND( rd_debug_inspect_own_item, "inspect an item you own by ID" )
@@ -910,6 +1634,26 @@ namespace ReactiveDropInventory
 		return
 #endif
 
+	bool ItemDef_t::ItemSlotMatches( const char *szRequiredSlot ) const
+	{
+		Assert( szRequiredSlot );
+		if ( !szRequiredSlot )
+			return false;
+
+		if ( ItemSlot == szRequiredSlot )
+			return true;
+
+		for ( int i = 0; i < NELEMS( g_InventorySlotAliases ); i++ )
+		{
+			if ( !V_strcmp( g_InventorySlotAliases[i][0], szRequiredSlot ) && ItemSlot == g_InventorySlotAliases[i][1] )
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	static bool ParseDynamicProps( CUtlStringMap<CUtlString> & props, const char *szDynamicProps )
 	{
 		jsmn_parser parser;
@@ -1049,11 +1793,6 @@ namespace ReactiveDropInventory
 	ItemInstance_t::ItemInstance_t( KeyValues *pKV )
 	{
 		FromKeyValues( pKV );
-	}
-
-	static bool DynamicPropertyAllowsArbitraryValues( const char *szPropertyName )
-	{
-		return false;
 	}
 
 	void ItemInstance_t::FormatDescription( wchar_t *wszBuf, size_t sizeOfBufferInBytes, const CUtlString &szDesc ) const
@@ -1258,6 +1997,11 @@ namespace ReactiveDropInventory
 	const ItemDef_t *GetItemDef( SteamItemDef_t id )
 	{
 		Assert( id >= 1 && id <= 999999999 );
+		if ( id <= 0 )
+		{
+			return NULL;
+		}
+
 		unsigned short index = s_ItemDefs.Find( id );
 		if ( s_ItemDefs.IsValidIndex( index ) )
 		{
@@ -1362,22 +2106,6 @@ namespace ReactiveDropInventory
 
 		char szKey[256];
 
-#ifdef CLIENT_DLL
-		pItemDef->Icon = NULL;
-		FETCH_PROPERTY( "icon_url" );
-		if ( *szValue )
-		{
-			pItemDef->Icon = new CSteamItemIcon( szValue );
-		}
-
-		pItemDef->IconSmall = pItemDef->Icon;
-		FETCH_PROPERTY( "icon_url_small" );
-		if ( *szValue )
-		{
-			pItemDef->IconSmall = new CSteamItemIcon( szValue );
-		}
-#endif
-
 		FETCH_PROPERTY( "item_slot" );
 		pItemDef->ItemSlot = szValue;
 		FETCH_PROPERTY( "tags" );
@@ -1386,6 +2114,10 @@ namespace ReactiveDropInventory
 		ParseTags( pItemDef->AllowedTagsFromTools, szValue );
 		FETCH_PROPERTY( "accessory_tag" );
 		pItemDef->AccessoryTag = szValue;
+		FETCH_PROPERTY( "accessory_limit" );
+		if ( *szValue )
+			pItemDef->AccessoryLimit = strtol( szValue, NULL, 10 );
+		Assert( pItemDef->AccessoryLimit <= RD_ITEM_MAX_ACCESSORIES );
 		FETCH_PROPERTY( "compressed_dynamic_props" );
 		if ( *szValue )
 		{
@@ -1409,6 +2141,22 @@ namespace ReactiveDropInventory
 		FETCH_PROPERTY( szKey );
 		if ( *szValue )
 			pItemDef->Name = szValue;
+
+		for ( int i = 0; ; i++ )
+		{
+			V_snprintf( szKey, sizeof( szKey ), "style_%d_name_english", i );
+			FETCH_PROPERTY( szKey );
+			if ( !*szValue )
+				break;
+
+			CUtlString szFallback( szValue );
+			V_snprintf( szKey, sizeof( szKey ), "style_%d_name_%s", i, szLang );
+			FETCH_PROPERTY( szKey );
+			if ( *szValue )
+				pItemDef->StyleNames.CopyAndAddToTail( szValue );
+			else
+				pItemDef->StyleNames.CopyAndAddToTail( szFallback );
+		}
 
 		FETCH_PROPERTY( "background_color" );
 		if ( *szValue )
@@ -1436,7 +2184,7 @@ namespace ReactiveDropInventory
 		}
 		
 		V_snprintf( szKey, sizeof( szKey ), "description_%s", szLang );
-		pItemDef->HasIngameDescription = false;
+		pItemDef->HasInGameDescription = false;
 		FETCH_PROPERTY( "description" );
 		pItemDef->Description = szValue;
 		FETCH_PROPERTY( szKey );
@@ -1447,14 +2195,11 @@ namespace ReactiveDropInventory
 		if ( *szValue )
 		{
 			pItemDef->Description = szValue;
-			pItemDef->HasIngameDescription = true;
-		}
-		V_snprintf( szKey, sizeof( szKey ), "ingame_description_%s", szLang );
-		FETCH_PROPERTY( szKey );
-		if ( *szValue )
-		{
-			pItemDef->Description = szValue;
-			pItemDef->HasIngameDescription = true;
+			pItemDef->HasInGameDescription = true;
+			V_snprintf( szKey, sizeof( szKey ), "ingame_description_%s", szLang );
+			FETCH_PROPERTY( szKey );
+			if ( *szValue )
+				pItemDef->Description = szValue;
 		}
 
 		V_snprintf( szKey, sizeof( szKey ), "briefing_name_%s", szLang );
@@ -1490,6 +2235,56 @@ namespace ReactiveDropInventory
 		FETCH_PROPERTY( "after_description_only_multi_stack" );
 		Assert( !V_strcmp( szValue, "" ) || !V_strcmp( szValue, "true" ) || !V_strcmp( szValue, "false" ) );
 		pItemDef->AfterDescriptionOnlyMultiStack = !V_strcmp( szValue, "true" );
+
+#ifdef CLIENT_DLL
+		pItemDef->Icon = NULL;
+		FETCH_PROPERTY( "icon_url" );
+		if ( *szValue )
+		{
+			CSteamItemIcon *&pIcon = s_ItemIcons[szValue];
+			if ( pIcon == NULL )
+			{
+				pIcon = new CSteamItemIcon( szValue );
+			}
+			pItemDef->Icon = pIcon;
+		}
+
+		pItemDef->IconSmall = pItemDef->Icon;
+		FETCH_PROPERTY( "icon_url_small" );
+		if ( *szValue )
+		{
+			CSteamItemIcon *&pIcon = s_ItemIcons[szValue];
+			if ( pIcon == NULL )
+			{
+				pIcon = new CSteamItemIcon( szValue );
+			}
+			pItemDef->IconSmall = pIcon;
+		}
+
+		pItemDef->StyleIcons.SetCount( pItemDef->StyleNames.Count() );
+		for ( int i = 0; i < pItemDef->StyleNames.Count(); i++ )
+		{
+			V_snprintf( szKey, sizeof( szKey ), "icon_url_style_%d", i );
+			pItemDef->StyleIcons[i] = pItemDef->Icon;
+			FETCH_PROPERTY( szKey );
+			if ( *szValue )
+			{
+				CSteamItemIcon *&pIcon = s_ItemIcons[szValue];
+				if ( pIcon == NULL )
+				{
+					pIcon = new CSteamItemIcon( szValue );
+				}
+				pItemDef->StyleIcons[i] = pIcon;
+			}
+		}
+
+		pItemDef->AccessoryIcon = NULL;
+		FETCH_PROPERTY( "accessory_icon" );
+		if ( *szValue )
+		{
+			pItemDef->AccessoryIcon = materials->FindTexture( szValue, TEXTURE_GROUP_CLIENT_EFFECTS );
+		}
+#endif
 #undef FETCH_PROPERTY
 
 		s_ItemDefs.Insert( id, pItemDef );
@@ -1552,13 +2347,73 @@ namespace ReactiveDropInventory
 		{
 			ReactiveDropInventory::ItemInstance_t instance{ hResult, 0 };
 			const ReactiveDropInventory::ItemDef_t *pItemDef = GetItemDef( instance.ItemDefID );
-			if ( !pItemDef || pItemDef->ItemSlot != szRequiredSlot )
+			if ( !pItemDef || !pItemDef->ItemSlotMatches( szRequiredSlot ) )
 			{
-				DevWarning( "ReactiveDropInventory::ValidateItemData: item fits in slot '%s', not '%s'\n", pItemDef ? pItemDef->ItemSlot.Get() : "<NO DEF>", szRequiredSlot);
+				DevWarning( "ReactiveDropInventory::ValidateItemData: item fits in slot '%s', not '%s'\n", pItemDef ? pItemDef->ItemSlot.Get() : "<NO DEF>", szRequiredSlot );
 
 				bValid = false;
 				return true;
 			}
+		}
+
+		bValid = true;
+		return true;
+	}
+
+	bool ValidateEquipItemData( bool &bValid, SteamInventoryResult_t hResult, byte( &nIndex )[RD_NUM_STEAM_INVENTORY_EQUIP_SLOTS], CSteamID requiredSteamID )
+	{
+		GET_INVENTORY_OR_BAIL( false );
+
+		EResult eResultStatus = pInventory->GetResultStatus( hResult );
+		if ( eResultStatus == k_EResultPending )
+		{
+			return false;
+		}
+
+		if ( eResultStatus != k_EResultOK )
+		{
+			DevWarning( "ReactiveDropInventory::ValidateEquipItemData: EResult %d (%s)\n", eResultStatus, UTIL_RD_EResultToString( eResultStatus ) );
+
+			bValid = false;
+			return true;
+		}
+
+		Assert( requiredSteamID.IsValid() );
+		if ( !pInventory->CheckResultSteamID( hResult, requiredSteamID ) )
+		{
+			DevWarning( "ReactiveDropInventory::ValidateEquipItemData: not from SteamID %llu\n", requiredSteamID.ConvertToUint64() );
+
+			bValid = false;
+			return true;
+		}
+
+		CUtlVector<SteamItemInstanceID_t> seenIDs;
+		seenIDs.EnsureCapacity( RD_NUM_STEAM_INVENTORY_EQUIP_SLOTS );
+
+		for ( int i = 0; i < RD_NUM_STEAM_INVENTORY_EQUIP_SLOTS; i++ )
+		{
+			if ( nIndex[i] == 0 )
+				continue;
+
+			ReactiveDropInventory::ItemInstance_t instance{ hResult, nIndex[i] - 1u };
+			const ReactiveDropInventory::ItemDef_t *pItemDef = GetItemDef( instance.ItemDefID );
+
+			if ( !pItemDef || !pItemDef->ItemSlotMatches( ReactiveDropInventory::g_InventorySlotNames[i] ) )
+			{
+				DevWarning( "ReactiveDropInventory::ValidateEquipItemData: item %llu '%s' fits in slot '%s', not '%s'\n", instance.ItemID, pItemDef ? pItemDef->Name.Get() : "<NO DEF>", pItemDef ? pItemDef->ItemSlot.Get() : "<NO DEF>", ReactiveDropInventory::g_InventorySlotNames[i] );
+
+				bValid = false;
+				return true;
+			}
+
+			if ( seenIDs.IsValidIndex( seenIDs.Find( instance.ItemID ) ) )
+			{
+				DevWarning( "ReactiveDropInventory::ValidateEquipItemData: item %llu '%s' is in multiple slots (latest '%s')\n", instance.ItemID, pItemDef ? pItemDef->Name.Get() : "<NO DEF>", ReactiveDropInventory::g_InventorySlotNames[i] );
+
+				bValid = false;
+				return true;
+			}
+			seenIDs.AddToTail( instance.ItemID );
 		}
 
 		bValid = true;
@@ -1585,6 +2440,7 @@ namespace ReactiveDropInventory
 		if ( s_RD_Inventory_Manager.m_PromotionalItemsResult != k_SteamInventoryResultInvalid )
 		{
 			DevMsg( "Not requesting generic promo items: request already in-flight.\n" );
+			s_RD_Inventory_Manager.m_bRequestGenericPromotionalItemsAgain = true;
 			return;
 		}
 
@@ -1593,10 +2449,26 @@ namespace ReactiveDropInventory
 		pInventory->GrantPromoItems( &s_RD_Inventory_Manager.m_PromotionalItemsResult );
 	}
 
-#ifdef RD_CRAFTING_ENABLED
+#ifdef RD_7A_DROPS
 	static const char *const s_RDWorkshopCompetitionTags[] =
 	{
 		"BossFight2023",
+		// (future themes subject to change)
+		//"SpaceStation2024",
+		//"Endless2025",
+		//"Biomes2026",
+		//"Deathmatch2027",
+		//"Factory2028",
+		//"Backtracking2029",
+		//"Transportation2030",
+		//"Defense2031",
+		//"VirtualReality2032",
+		//"AlternatePath2033",
+		//"Coast2034",
+		//"Scavenger2035",
+		//"Mining2036",
+		//"Infiltration2037",
+		//"City2038",
 	};
 
 	static const struct
@@ -1679,7 +2551,7 @@ namespace ReactiveDropInventory
 
 	void CheckPlaytimeItemGenerators( int iMarineClass )
 	{
-#ifdef RD_CRAFTING_ENABLED
+#ifdef RD_7A_DROPS
 		for ( int i = 0; i < NELEMS( s_RD_Inventory_Manager.m_PlaytimeItemGeneratorResult ); i++ )
 		{
 			if ( s_RD_Inventory_Manager.m_PlaytimeItemGeneratorResult[i] != k_SteamInventoryResultInvalid )
@@ -1762,7 +2634,37 @@ namespace ReactiveDropInventory
 		pInventory->TriggerItemDrop( &s_RD_Inventory_Manager.m_PlaytimeItemGeneratorResult[2], 7029 );
 #endif
 	}
+
+	void CommitDynamicProperties()
+	{
+		s_RD_Inventory_Manager.CommitDynamicProperties();
+	}
 #endif
+
+	void OnHitConfirm( CBaseEntity *pAttacker, CBaseEntity *pTarget, Vector vecDamagePosition, bool bKilled, bool bDamageOverTime, bool bBlastDamage, int iDisposition, float flDamage, CBaseEntity *pWeapon )
+	{
+		CASW_Game_Resource *pGameResource = ASWGameResource();
+		if ( !pGameResource )
+			return;
+
+		if ( !ASWDeathmatchMode() )
+		{
+			if ( pTarget && pTarget->IsInhabitableNPC() && bKilled )
+			{
+				s_RD_Inventory_Manager.IncrementStrangePropertyOnEquippedItems( assert_cast< CASW_Inhabitable_NPC * >( pTarget ), 5007, 0, 0, false ); // Alien Kill Streak
+			}
+
+			if ( !pAttacker || !pAttacker->IsInhabitableNPC() )
+				return;
+
+			CASW_Inhabitable_NPC *pInhabitableAttacker = assert_cast< CASW_Inhabitable_NPC * >( pAttacker );
+			if ( pTarget && pTarget->IsAlien() && bKilled )
+			{
+				s_RD_Inventory_Manager.IncrementStrangePropertiesForWeapon( pInhabitableAttacker, pWeapon, 5002, 1 ); // Aliens Killed
+				s_RD_Inventory_Manager.IncrementStrangePropertiesForWeapon( pInhabitableAttacker, pWeapon, 5007, 1 ); // Alien Kill Streak
+			}
+		}
+	}
 
 #undef GET_INVENTORY_OR_BAIL
 }
@@ -1772,10 +2674,12 @@ namespace ReactiveDropInventory
 
 BEGIN_NETWORK_TABLE_NOBASE( CRD_ItemInstance, DT_RD_ItemInstance )
 #ifdef CLIENT_DLL
+	RecvPropInt( RECVINFO( m_iItemInstanceID ) ),
 	RecvPropInt( RECVINFO( m_iItemDefID ) ),
 	RecvPropArray( RecvPropInt( RECVINFO( m_iAccessory[0] ) ), m_iAccessory ),
 	RecvPropArray( RecvPropInt( RECVINFO( m_nCounter[0] ) ), m_nCounter ),
 #else
+	SendPropInt( SENDINFO( m_iItemInstanceID ), 64, SPROP_UNSIGNED ),
 	SendPropInt( SENDINFO( m_iItemDefID ), RD_ITEM_ID_BITS, SPROP_UNSIGNED ),
 	SendPropArray( SendPropInt( SENDINFO_ARRAY( m_iAccessory ), RD_ITEM_ACCESSORY_BITS, SPROP_UNSIGNED ), m_iAccessory ),
 	SendPropArray( SendPropInt( SENDINFO_ARRAY( m_nCounter ), 63, SPROP_UNSIGNED ), m_nCounter ),
@@ -1799,6 +2703,7 @@ CRD_ItemInstance::CRD_ItemInstance( SteamInventoryResult_t hResult, uint32 index
 
 void CRD_ItemInstance::Reset()
 {
+	m_iItemInstanceID = k_SteamItemInstanceIDInvalid;
 	m_iItemDefID = 0;
 	for ( int i = 0; i < m_iAccessory.Count(); i++ )
 	{
@@ -1819,6 +2724,7 @@ void CRD_ItemInstance::SetFromInstance( const ReactiveDropInventory::ItemInstanc
 {
 	Reset();
 
+	m_iItemInstanceID = instance.ItemID;
 	m_iItemDefID = instance.ItemDefID;
 	const ReactiveDropInventory::ItemDef_t *pDef = ReactiveDropInventory::GetItemDef( m_iItemDefID );
 	Assert( pDef );
@@ -1829,7 +2735,7 @@ void CRD_ItemInstance::SetFromInstance( const ReactiveDropInventory::ItemInstanc
 
 	FOR_EACH_VEC( pDef->CompressedDynamicProps, i )
 	{
-		Assert( !ReactiveDropInventory::DynamicPropertyAllowsArbitraryValues( pDef->CompressedDynamicProps[i] ) );
+		Assert( !DynamicPropertyAllowsArbitraryValues( pDef->CompressedDynamicProps[i] ) );
 
 		if ( !V_stricmp( pDef->CompressedDynamicProps[i], "m_unQuantity" ) )
 		{
@@ -1860,7 +2766,7 @@ void CRD_ItemInstance::SetFromInstance( const ReactiveDropInventory::ItemInstanc
 			const ReactiveDropInventory::ItemDef_t *pAccessoryDef = ReactiveDropInventory::GetItemDef( iAccessoryID );
 			FOR_EACH_VEC( pAccessoryDef->CompressedDynamicProps, j )
 			{
-				Assert( !ReactiveDropInventory::DynamicPropertyAllowsArbitraryValues( pAccessoryDef->CompressedDynamicProps[j] ) );
+				Assert( !DynamicPropertyAllowsArbitraryValues( pAccessoryDef->CompressedDynamicProps[j] ) );
 				if ( instance.DynamicProps.Defined( pAccessoryDef->CompressedDynamicProps[j] ) )
 				{
 					const char *szPropValue = instance.DynamicProps[instance.DynamicProps.Find( pAccessoryDef->CompressedDynamicProps[j] )];
@@ -1951,7 +2857,14 @@ void CRD_ItemInstance::FormatDescription( wchar_t *wszBuf, size_t sizeOfBufferIn
 		{
 			if ( !V_strcmp( pDef->CompressedDynamicProps[j], szToken ) )
 			{
-				V_wcsncpy( wszReplacement, UTIL_RD_CommaNumber( m_nCounter[j] ), sizeof( wszReplacement ) );
+				if ( !V_strcmp( szToken, "style" ) && m_nCounter[j] >= 0 && m_nCounter[j] < pDef->StyleNames.Count() )
+				{
+					V_UTF8ToUnicode( pDef->StyleNames[m_nCounter[j]], wszReplacement, sizeof( wszReplacement ) );
+				}
+				else
+				{
+					V_wcsncpy( wszReplacement, UTIL_RD_CommaNumber( m_nCounter[j] ), sizeof( wszReplacement ) );
+				}
 				break;
 			}
 		}
@@ -2088,7 +3001,7 @@ void CRD_ItemInstance::FormatDescription( vgui::RichText *pRichText ) const
 	if ( bAnyAccessories )
 		pRichText->InsertString( L"\n" );
 
-	if ( pDef->HasIngameDescription )
+	if ( pDef->HasInGameDescription )
 		FormatDescription( wszBuf, sizeof( wszBuf ), pDef->Description );
 	else
 		V_UTF8ToUnicode( pDef->Description, wszBuf, sizeof( wszBuf ) );
@@ -2118,6 +3031,76 @@ void CRD_ItemInstance::FormatDescription( vgui::RichText *pRichText ) const
 			pRichText->InsertString( L"\n\n" );
 			AppendBBCode( pRichText, wszBuf, rd_briefing_item_details_color2.GetColor() );
 		}
+	}
+}
+#endif
+
+#ifndef CLIENT_DLL
+static void *SendProxy_ProjectileItemDataForOwningPlayer( const SendProp *pProp, const void *pStructBase, const void *pData, CSendProxyRecipients *pRecipients, int objectID )
+{
+	static CRD_ItemInstance s_BlankInstance;
+
+	const CRD_ProjectileData *pProjectile = static_cast< const CRD_ProjectileData * >( pStructBase );
+	CASW_Player *pPlayer = pProjectile->m_hOriginalOwnerPlayer;
+	if ( !pPlayer || pProjectile->m_iInventoryEquipSlotIndex == -1 )
+		return &s_BlankInstance;
+
+	return &pPlayer->m_EquippedItemData[pProjectile->m_iInventoryEquipSlotIndex];
+}
+#endif
+
+BEGIN_NETWORK_TABLE_NOBASE( CRD_ProjectileData, DT_RD_ProjectileData )
+#ifdef CLIENT_DLL
+	RecvPropInt( RECVINFO( m_iOriginalOwnerSteamAccount ) ),
+	RecvPropDataTable( RECVINFO_DT( m_InventoryItemData ), 0, &REFERENCE_RECV_TABLE( DT_RD_ItemInstance ) ),
+	RecvPropBool( RECVINFO( m_bFiredByOwner ) ),
+#else
+	SendPropInt( SENDINFO( m_iOriginalOwnerSteamAccount ), -1, SPROP_UNSIGNED ),
+	SendPropDataTable( "m_InventoryItemData", 0, &REFERENCE_SEND_TABLE( DT_RD_ItemInstance ), SendProxy_ProjectileItemDataForOwningPlayer ),
+	SendPropBool( SENDINFO( m_bFiredByOwner ) ),
+#endif
+END_NETWORK_TABLE()
+
+CRD_ProjectileData::CRD_ProjectileData()
+{
+	m_iOriginalOwnerSteamAccount = 0;
+#ifdef CLIENT_DLL
+	m_InventoryItemData.Reset();
+#else
+	m_hOriginalOwnerPlayer = NULL;
+	m_iInventoryEquipSlotIndex = -1;
+#endif
+	m_bFiredByOwner = false;
+}
+
+#ifdef GAME_DLL
+void CRD_ProjectileData::SetFromWeapon( CBaseEntity *pCreator )
+{
+	if ( CASW_Weapon *pWeapon = dynamic_cast< CASW_Weapon * >( pCreator ) )
+	{
+		m_iOriginalOwnerSteamAccount = pWeapon->m_iOriginalOwnerSteamAccount;
+		m_hOriginalOwnerPlayer = pWeapon->m_hOriginalOwnerPlayer;
+		m_iInventoryEquipSlotIndex = pWeapon->m_iInventoryEquipSlotIndex;
+		if ( pWeapon->GetOwner() && pWeapon->GetOwner()->IsInhabitableNPC() )
+		{
+			CASW_Inhabitable_NPC *pOwnerNPC = assert_cast< CASW_Inhabitable_NPC * >( pWeapon->GetOwner() );
+			m_bFiredByOwner = pOwnerNPC->IsInhabited() && pOwnerNPC->GetCommander() == pWeapon->m_hOriginalOwnerPlayer;
+		}
+		return;
+	}
+
+	if ( CASW_Sentry_Top *pSentry = dynamic_cast< CASW_Sentry_Top * >( pCreator ) )
+	{
+		pCreator = pSentry->GetSentryBase();
+	}
+
+	if ( CASW_Sentry_Base *pSentry = dynamic_cast< CASW_Sentry_Base * >( pCreator ) )
+	{
+		m_iOriginalOwnerSteamAccount = pSentry->m_iOriginalOwnerSteamAccount;
+		m_hOriginalOwnerPlayer = pSentry->m_hOriginalOwnerPlayer;
+		m_iInventoryEquipSlotIndex = pSentry->m_iInventoryEquipSlotIndex;
+		m_bFiredByOwner = true;
+		return;
 	}
 }
 #endif

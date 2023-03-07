@@ -19,6 +19,8 @@
 	#include "fogcontroller.h"
 	#include "asw_point_camera.h"
 	#include "asw_deathmatch_mode.h"
+	#include "asw_sentry_base.h"
+	#include "asw_sentry_top.h"
 #else
 	#include "asw_gamerules.h"
 	#include "c_asw_drone_advanced.h"
@@ -672,7 +674,16 @@ CASW_Marine* UTIL_ASW_Marine_Can_Chatter_Spot(CBaseEntity *pEntity, float fDist)
 	return NULL;
 }
 
+CASW_ViewNPCRecipientFilter::CASW_ViewNPCRecipientFilter()
+{
+}
+
 CASW_ViewNPCRecipientFilter::CASW_ViewNPCRecipientFilter( CASW_Inhabitable_NPC *pNPC, bool bSendToRecorders )
+{
+	AddRecipientsByViewNPC( pNPC, bSendToRecorders );
+}
+
+void CASW_ViewNPCRecipientFilter::AddRecipientsByViewNPC( CASW_Inhabitable_NPC *pNPC, bool bSendToRecorders)
 {
 	for ( int i = 1; i <= MAX_PLAYERS; i++ )
 	{
@@ -684,6 +695,63 @@ CASW_ViewNPCRecipientFilter::CASW_ViewNPCRecipientFilter( CASW_Inhabitable_NPC *
 	}
 }
 
+void UTIL_RD_HitConfirm( CBaseEntity *pTarget, int iHealthBefore, const CTakeDamageInfo &info )
+{
+	Assert( pTarget );
+	Assert( iHealthBefore > 0 );
+
+	CASW_ViewNPCRecipientFilter filter;
+	CASW_Inhabitable_NPC *pInhabitableTarget = NULL;
+	if ( pTarget && pTarget->IsInhabitableNPC() )
+	{
+		pInhabitableTarget = assert_cast< CASW_Inhabitable_NPC * >( pTarget );
+		filter.AddRecipientsByViewNPC( pInhabitableTarget );
+	}
+
+	CBaseEntity *pAttacker = info.GetAttacker();
+	CBaseEntity *pWeapon = info.GetWeapon();
+	if ( CASW_Sentry_Top *pSentry = dynamic_cast< CASW_Sentry_Top * >( pAttacker ) )
+	{
+		CASW_Sentry_Base *pBase = pSentry->GetSentryBase();
+		if ( pBase && pBase->m_hDeployer )
+		{
+			pAttacker = pBase->m_hDeployer;
+			pWeapon = pBase;
+		}
+	}
+	CASW_Inhabitable_NPC *pInhabitableAttacker = NULL;
+	if ( pAttacker && pAttacker->IsInhabitableNPC() )
+	{
+		pInhabitableAttacker = assert_cast< CASW_Inhabitable_NPC * >( pAttacker );
+		filter.AddRecipientsByViewNPC( pInhabitableAttacker );
+	}
+
+	Vector vecDamagePosition = info.GetDamagePosition();
+	if ( pTarget && vecDamagePosition == vec3_origin )
+	{
+		vecDamagePosition = pTarget->WorldSpaceCenter();
+	}
+
+	bool bKilled = pTarget && pTarget->GetHealth() <= 0;
+	bool bDamageOverTime = info.GetDamageType() & DMG_DIRECT;
+	bool bBlastDamage = info.GetDamageType() & DMG_BLAST;
+	Disposition_t iDisposition = pInhabitableAttacker && pTarget ? pInhabitableAttacker->IRelationType( pTarget ) : D_HT;
+	float flDamage = MIN( info.GetDamage(), iHealthBefore );
+
+	UserMessageBegin( filter, "RDHitConfirm" );
+		WRITE_ENTITY( pAttacker ? pAttacker->entindex() : -1 );
+		WRITE_ENTITY( pTarget ? pTarget->entindex() : -1 );
+		WRITE_VEC3COORD( vecDamagePosition );
+		WRITE_BOOL( bKilled );
+		WRITE_BOOL( bDamageOverTime );
+		WRITE_BOOL( bBlastDamage );
+		WRITE_UBITLONG( iDisposition, 3 );
+		WRITE_FLOAT( flDamage );
+		WRITE_ENTITY( pWeapon ? pWeapon->entindex() : -1 );
+	MessageEnd();
+
+	ReactiveDropInventory::OnHitConfirm( pAttacker, pTarget, vecDamagePosition, bKilled, bDamageOverTime, bBlastDamage, iDisposition, flDamage, pWeapon );
+}
 #endif
 
 //-----------------------------------------------------------------------------
@@ -1138,7 +1206,7 @@ void UTIL_ASW_ClientFloatingDamageNumber( const CTakeDamageInfo &info )
 			if (pAttackingPlayer != C_BasePlayer::GetLocalPlayer())
 				return;
 
-			UTIL_ASW_ParticleDamageNumber(info.GetAttacker(), info.GetDamagePosition(), int(info.GetDamage()), info.GetDamageCustom(), 1.0f, false);
+			UTIL_ASW_ParticleDamageNumber( info.GetAttacker(), info.GetDamagePosition(), int( info.GetDamage() ), info.GetDamageCustom(), 1.0f, false, false );
 		}
 	}
 }
@@ -1146,9 +1214,11 @@ void UTIL_ASW_ClientFloatingDamageNumber( const CTakeDamageInfo &info )
 PRECACHE_REGISTER_BEGIN( GLOBAL, ParticleDamageNumbers )
 	PRECACHE( PARTICLE_SYSTEM, "damage_numbers" )
 	PRECACHE( PARTICLE_SYSTEM, "floating_numbers" )
+	PRECACHE( PARTICLE_SYSTEM, "damage_numbers_noramp" )
+	PRECACHE( PARTICLE_SYSTEM, "floating_numbers_noramp" )
 PRECACHE_REGISTER_END()
 
-HPARTICLEFFECT UTIL_ASW_ParticleDamageNumber( C_BaseEntity *pEnt, Vector vecPos, int iDamage, int iDmgCustom, float flScale, bool bRandomVelocity )
+HPARTICLEFFECT UTIL_ASW_ParticleDamageNumber( C_BaseEntity *pEnt, Vector vecPos, int iDamage, int iDmgCustom, float flScale, bool bRandomVelocity, bool bSkipRampUp )
 {
 	if ( asw_floating_number_type.GetInt() != 2 )
 		return NULL;
@@ -1158,7 +1228,7 @@ HPARTICLEFFECT UTIL_ASW_ParticleDamageNumber( C_BaseEntity *pEnt, Vector vecPos,
 
 	QAngle vecAngles;
 	vecAngles[PITCH] = 0.0f;
-	vecAngles[YAW] = ASWInput()->ASW_GetCameraYaw();
+	vecAngles[YAW] = ASWInput()->ASW_GetCameraYaw() - 90;
 	vecAngles[ROLL] = ASWInput()->ASW_GetCameraPitch();
 
 	//Msg( "DMG # angles ( %f, %f, %f )\n", vecAngles[PITCH], vecAngles[YAW], vecAngles[ROLL] );
@@ -1167,7 +1237,7 @@ HPARTICLEFFECT UTIL_ASW_ParticleDamageNumber( C_BaseEntity *pEnt, Vector vecPos,
 
 	Color cNumber = Color( 255, 240, 240 );
 
-	int iCrit = 0;
+	int iPrefix = 0, iCrit = 0;
 	float flNewScale = MAX( flScale, 1.0f );
 	float flLifetime = 1.0f;
 	int r, g, b;
@@ -1180,6 +1250,7 @@ HPARTICLEFFECT UTIL_ASW_ParticleDamageNumber( C_BaseEntity *pEnt, Vector vecPos,
 	}
 	else if ( iDmgCustom & DAMAGE_FLAG_WEAKSPOT )
 	{
+		iPrefix = 1;
 		flNewScale *= 1.3f;
 		flLifetime = 1.25f;
 		cNumber = Color( 255, 128, 128 );
@@ -1198,14 +1269,14 @@ HPARTICLEFFECT UTIL_ASW_ParticleDamageNumber( C_BaseEntity *pEnt, Vector vecPos,
 	CUtlReference<CNewParticleEffect> pEffect;
 	if ( bRandomVelocity )
 	{
-		pEffect = pEnt->ParticleProp()->Create( "damage_numbers", PATTACH_CUSTOMORIGIN );
+		pEffect = pEnt->ParticleProp()->Create( bSkipRampUp ? "damage_numbers_noramp" : "damage_numbers", PATTACH_CUSTOMORIGIN );
 	}
 	else
 	{
-		pEffect = pEnt->ParticleProp()->Create( "floating_numbers", PATTACH_CUSTOMORIGIN );
+		pEffect = pEnt->ParticleProp()->Create( bSkipRampUp ? "floating_numbers_noramp" : "floating_numbers", PATTACH_CUSTOMORIGIN );
 	}
 	pEffect->SetControlPoint( 0, vecPos );
-	pEffect->SetControlPoint( 1, Vector( 0, iDamage, iCrit ) );
+	pEffect->SetControlPoint( 1, Vector( iPrefix, iDamage, iCrit ) );
 	pEffect->SetControlPoint( 2, Vector( r, g, b ) );
 	pEffect->SetControlPoint( 3, Vector( flNewScale, flLifetime, 0 ) );
 	pEffect->SetControlPointOrientation( 5, vecForward, vecRight, vecUp );
@@ -1261,7 +1332,7 @@ void __MsgFunc_ASWDamageNumber( bf_read &msg )
 	}
 	else if ( asw_floating_number_type.GetInt() == 2 )
 	{
-		UTIL_ASW_ParticleDamageNumber( pEnt, pEnt->WorldSpaceCenter(), iAmount, iFlags, 1.25f, false );
+		UTIL_ASW_ParticleDamageNumber( pEnt, pEnt->WorldSpaceCenter(), iAmount, iFlags, 1.25f, false, false );
 	}
 }
 USER_MESSAGE_REGISTER( ASWDamageNumber );

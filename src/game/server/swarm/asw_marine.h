@@ -8,6 +8,8 @@
 #include "asw_playeranimstate.h"
 #include "asw_lag_compensation.h"
 #include "iasw_server_usable_entity.h"
+#include "asw_weapon.h"
+#include "rd_inventory_shared.h"
 
 class CASW_Player;
 class CASW_Marine_Resource;
@@ -276,9 +278,14 @@ public:
 	void SetNightVision( bool bNightVision ) { m_bNightVision = bNightVision; }
 	CNetworkVar( bool, m_bNightVision );
 
-	void AddElectrifiedArmor( float flDuration ) { m_flElectrifiedArmorEndTime = MAX( GetElectrifiedArmorEndTime(), gpGlobals->curtime + flDuration ); }
+	void AddElectrifiedArmor( float flDuration, CASW_Weapon *pArmor )
+	{
+		m_flElectrifiedArmorEndTime = MAX( GetElectrifiedArmorEndTime(), gpGlobals->curtime + flDuration );
+		m_ElectrifiedArmorProjectileData.GetForModify().SetFromWeapon( pArmor );
+	}
 	float GetElectrifiedArmorEndTime() { return m_flElectrifiedArmorEndTime.Get(); }
 	bool IsElectrifiedArmorActive() { return GetElectrifiedArmorEndTime() > gpGlobals->curtime; }
+	CNetworkVarEmbedded( CRD_ProjectileData, m_ElectrifiedArmorProjectileData );
 	CNetworkVar( float, m_flElectrifiedArmorEndTime );
 	
 	void ApplyPassiveArmorEffects( CTakeDamageInfo &dmgInfo ) RESTRICT ;
@@ -598,7 +605,7 @@ public:
 	void AllowOverHeal(bool state) { m_bOverHealAllowed = state; }
 	void MeleeBleed(CTakeDamageInfo* info);
 	void BecomeInfested(CASW_Alien* pAlien);
-	void CureInfestation(CASW_Marine *pHealer, float fCureFraction);
+	void CureInfestation( CASW_Marine *pHealer, CBaseEntity *pWeapon, float fCureFraction );
 	void ScriptBecomeInfested();
 	void ScriptCureInfestation();
 	bool m_bPlayedCureScream;	// have we played a scream sound for our parasite?
@@ -609,7 +616,9 @@ public:
 	virtual void ScriptIgnite( float flFlameLifetime );
 	virtual void ASW_Ignite( float flFlameLifetime, float flSize, CBaseEntity *pAttacker, CBaseEntity *pDamagingWeapon = NULL );
 	virtual void Ignite( float flFlameLifetime, bool bNPCOnly = true, float flSize = 0.0f, bool bCalledByLevelDesigner = false );
+	virtual void Extinguish( CBaseEntity *pHealer, CBaseEntity *pWeapon );
 	virtual void Extinguish();
+	void ScriptExtinguish() { Extinguish( NULL, NULL ); }
 	virtual	bool		AllowedToIgnite( void );
 	float m_flFirstBurnTime;
 	float m_flLastBurnTime;
@@ -644,6 +653,7 @@ public:
 	float m_fLastMobDamageTime;
 	bool m_bHasBeenMobAttacked;
 	CHandle<CASW_Marine> m_hInfestationCurer;	// the last medic to cure us of some infestation - give him some stats if I survive the infestation
+	EHANDLE m_hInfestationCureWeapon;
 	CNetworkVar(bool, m_bOnFire);
 	virtual bool TestHitboxes( const Ray_t &ray, unsigned int fContentsMask, trace_t& tr );
 	virtual void TraceAttack( const CTakeDamageInfo &info, const Vector &vecDir, trace_t *ptr );

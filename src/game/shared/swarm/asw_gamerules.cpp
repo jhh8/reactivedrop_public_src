@@ -700,7 +700,7 @@ ConVar	sk_max_asw_medrifle( "sk_max_asw_medrifle", "504", FCVAR_REPLICATED | FCV
 
 // AR2 (6 clips, 30 per)
 ConVar	sk_plr_dmg_ar2( "sk_plr_dmg_ar2", "8", FCVAR_REPLICATED | FCVAR_CHEAT );
-ConVar	sk_npc_dmg_ar2( "sk_npc_dmg_ar2", "8", FCVAR_REPLICATED | FCVAR_CHEAT );
+ConVar	sk_npc_dmg_ar2( "sk_npc_dmg_ar2", "5", FCVAR_REPLICATED | FCVAR_CHEAT );
 ConVar	sk_max_ar2( "sk_max_ar2", "180", FCVAR_REPLICATED | FCVAR_CHEAT );
 ConVar	sk_max_ar2_altfire( "sk_max_ar2_altfire", "3", FCVAR_REPLICATED | FCVAR_CHEAT );
 
@@ -767,7 +767,19 @@ ConVar rd_player_bots_allowed( "rd_player_bots_allowed", "1", FCVAR_CHEAT | FCVA
 ConVar rd_slowmo( "rd_slowmo", "1", FCVAR_NONE, "If 0 env_slomo will be deleted from map on round start(if present)" );
 #endif
 ConVar rd_queen_hud_suppress_time( "rd_queen_hud_suppress_time", "-1.0", FCVAR_CHEAT | FCVAR_REPLICATED, "Hides the Swarm Queen's health HUD if not damaged for this long (-1 to always show)" );
-ConVar rd_anniversary_week_debug( "rd_anniversary_week_debug", "-1", FCVAR_CHEAT | FCVAR_REPLICATED, "Set to 1 to force anniversary week logic; 0 to force off" );
+ConVar rd_anniversary_week_debug( "rd_anniversary_week_debug", "-1", FCVAR_CHEAT | FCVAR_REPLICATED, "Set to 1 to force anniversary week logic (requires sv_cheats); 0 to force off" );
+static void SoundPitchScaleChanged( IConVar *var, const char *pOldValue, float flOldValue )
+{
+#ifdef CLIENT_DLL
+	ConVarRef cv( var );
+	if ( engine && engine->IsConnected() )
+	{
+		// if we're in slomo, this will cause a tiny anomaly in the pitch which will get corrected by the local player's ClientThink.
+		engine->SetPitchScale( cv.GetFloat() );
+	}
+#endif
+}
+ConVar rd_sound_pitch_scale( "rd_sound_pitch_scale", "1.0", FCVAR_CHEAT | FCVAR_REPLICATED, "Global audio pitch modifier.", SoundPitchScaleChanged );
 extern ConVar asw_stats_verbose;
 
 #define ADD_STAT( field, amount ) \
@@ -1336,7 +1348,7 @@ CAlienSwarm::CAlienSwarm()
 	m_iPreviousGameState = 200;
 	m_iPreviousMissionWorkshopID = 999999; // impossible workshop ID
 
-	engine->SetPitchScale( 1.0f );
+	engine->SetPitchScale( rd_sound_pitch_scale.GetFloat() );
 
 	CVoiceStatus *pVoiceMgr = GetClientVoiceMgr();
 	if ( pVoiceMgr )
@@ -1509,6 +1521,7 @@ CAlienSwarm::CAlienSwarm() : m_ActorSpeakingUntil( DefLessFunc( string_t ) )
 	m_MapResetFilter.AddKeepEntity( "info_node_climb" );
 	m_MapResetFilter.AddKeepEntity( "info_marine_hint" );
 	m_MapResetFilter.AddKeepEntity( "info_node_marine_hint" );
+	m_MapResetFilter.AddKeepEntity( "infodecal" );
 
 	// riflemod: keep health regen entity all the time
 	m_MapResetFilter.AddKeepEntity( "asw_health_regen" );
@@ -4251,7 +4264,7 @@ bool CAlienSwarm::CanHaveAmmo( CBaseCombatCharacter *pPlayer, int iAmmoIndex )
 	return false;
 }
 
-void CAlienSwarm::GiveStartingWeaponToMarine( CASW_Marine *pMarine, int iEquipIndex, int iSlot )
+void CAlienSwarm::GiveStartingWeaponToMarine( CASW_Marine *pMarine, int iEquipIndex, int iSlot, bool bAssociateWithAccount )
 {
 	if ( !pMarine || iEquipIndex == -1 || iSlot < 0 || iSlot >= ASW_MAX_EQUIP_SLOTS )
 		return;
@@ -4270,6 +4283,14 @@ void CAlienSwarm::GiveStartingWeaponToMarine( CASW_Marine *pMarine, int iEquipIn
 	Assert( pWeapon );
 	if ( !pWeapon )
 		return;
+
+	CSteamID ownerID;
+	if ( bAssociateWithAccount && pMarine->GetCommander() && pMarine->GetCommander()->GetSteamID( &ownerID ) && ownerID.BIndividualAccount() )
+	{
+		pWeapon->m_iOriginalOwnerSteamAccount = ownerID.GetAccountID();
+		pWeapon->m_hOriginalOwnerPlayer = pMarine->GetCommander();
+		pWeapon->m_iInventoryEquipSlotIndex = pEquip->m_iInventoryIndex;
+	}
 
 	// If I have a name, make my weapon match it with "_weapon" appended
 	if ( pMarine->GetEntityName() != NULL_STRING )
@@ -6616,7 +6637,7 @@ void CAlienSwarm::ShockNearbyAliens( CASW_Marine *pMarine, CASW_Weapon *pWeaponS
 	}
 }
 
-void CAlienSwarm::FreezeAliensInRadius( CBaseEntity *pInflictor, float flFreezeAmount, const Vector &vecSrcIn, float flRadius )
+void CAlienSwarm::FreezeAliensInRadius( CBaseEntity *pAttacker, CBaseEntity *pInflictor, float flFreezeAmount, const Vector &vecSrcIn, float flRadius )
 {
 	const int MASK_RADIUS_DAMAGE = MASK_SHOT&(~CONTENTS_HITBOX);
 	CBaseEntity *pEntity = NULL;
@@ -6631,7 +6652,7 @@ void CAlienSwarm::FreezeAliensInRadius( CBaseEntity *pInflictor, float flFreezeA
 	float flHalfRadiusSqr = Square( flRadius / 2.0f );
 	//float flMarineHalfRadiusSqr = flHalfRadiusSqr * asw_marine_explosion_protection.GetFloat();
 
-	CASW_Marine *pInflictorMarine = CASW_Marine::AsMarine( pInflictor );
+	CASW_Marine *pAttackerMarine = CASW_Marine::AsMarine( pAttacker );
 
 	// iterate on all entities in the vicinity.
 	for ( CEntitySphereQuery sphere( vecSrc, flRadius ); (pEntity = sphere.GetCurrentEntity()) != NULL; sphere.NextEntity() )
@@ -6655,17 +6676,20 @@ void CAlienSwarm::FreezeAliensInRadius( CBaseEntity *pInflictor, float flFreezeA
 				{
 					pAnim->SetEffectEntity( NULL );
 					UTIL_Remove( pFireChild );	
-				}			
-				pAnim->Extinguish();
+				}
+				if ( CASW_Marine *pMarine = CASW_Marine::AsMarine( pAnim ) )
+					pMarine->Extinguish( pAttacker, pInflictor );
+				else
+					pAnim->Extinguish();
 
-				CASW_Marine_Resource *pMR = pInflictorMarine ? pInflictorMarine->GetMarineResource() : NULL;
+				CASW_Marine_Resource *pMR = pAttackerMarine ? pAttackerMarine->GetMarineResource() : NULL;
 				if ( pMR )
 				{
 					ADD_STAT( m_iGrenadeExtinguishMarine, 1 );
 				}
 			}
 #endif
-			if ( !ASWDeathmatchMode() && ( !pInflictor || ( pInflictorMarine && pInflictorMarine->IRelationType( pEntity ) == D_LI ) ) )
+			if ( !ASWDeathmatchMode() && ( !pAttacker || ( pAttackerMarine && pAttackerMarine->IRelationType( pEntity ) == D_LI ) ) )
 				continue;
 		}
 
@@ -6674,7 +6698,7 @@ void CAlienSwarm::FreezeAliensInRadius( CBaseEntity *pInflictor, float flFreezeA
 
 		// Check that the explosion can 'see' this entity.
 		vecSpot = pEntity->BodyTarget( vecSrc, false );
-		UTIL_TraceLine( vecSrc, vecSpot, MASK_RADIUS_DAMAGE, pInflictor, COLLISION_GROUP_NONE, &tr );
+		UTIL_TraceLine( vecSrc, vecSpot, MASK_RADIUS_DAMAGE, pAttacker, COLLISION_GROUP_NONE, &tr );
 
 		if ( tr.fraction != 1.0 )
 		{
@@ -6699,11 +6723,11 @@ void CAlienSwarm::FreezeAliensInRadius( CBaseEntity *pInflictor, float flFreezeA
 					VectorNormalize( vecDeflect );
 
 					// Trace along the surface that intercepted the blast...
-					UTIL_TraceLine( tr.endpos, tr.endpos + vecDeflect * ROBUST_RADIUS_PROBE_DIST, MASK_RADIUS_DAMAGE, pInflictor, COLLISION_GROUP_NONE, &tr );
+					UTIL_TraceLine( tr.endpos, tr.endpos + vecDeflect * ROBUST_RADIUS_PROBE_DIST, MASK_RADIUS_DAMAGE, pAttacker, COLLISION_GROUP_NONE, &tr );
 					//NDebugOverlay::Line( tr.startpos, tr.endpos, 255, 255, 0, false, 10 );
 
 					// ...to see if there's a nearby edge that the explosion would 'spill over' if the blast were fully simulated.
-					UTIL_TraceLine( tr.endpos, vecSpot, MASK_RADIUS_DAMAGE, pInflictor, COLLISION_GROUP_NONE, &tr );
+					UTIL_TraceLine( tr.endpos, vecSpot, MASK_RADIUS_DAMAGE, pAttacker, COLLISION_GROUP_NONE, &tr );
 					//NDebugOverlay::Line( tr.startpos, tr.endpos, 255, 0, 0, false, 10 );
 
 					if( tr.fraction != 1.0 && tr.DidHitWorld() )
@@ -6728,7 +6752,7 @@ void CAlienSwarm::FreezeAliensInRadius( CBaseEntity *pInflictor, float flFreezeA
 				//CBaseEntity *pBlockingEntity = tr.m_pEnt;
 				//Msg( "%s may be blocked by %s...", pEntity->GetClassname(), pBlockingEntity->GetClassname() );
 
-				UTIL_TraceLine( vecSrc, vecSpot, CONTENTS_SOLID, pInflictor, COLLISION_GROUP_NONE, &tr );
+				UTIL_TraceLine( vecSrc, vecSpot, CONTENTS_SOLID, pAttacker, COLLISION_GROUP_NONE, &tr );
 
 				if( tr.fraction != 1.0 )
 				{
@@ -6746,27 +6770,43 @@ void CAlienSwarm::FreezeAliensInRadius( CBaseEntity *pInflictor, float flFreezeA
 			{
 				pAnim->SetEffectEntity( NULL );
 				UTIL_Remove( pFireChild );	
-			}			
-			pAnim->Extinguish();
+			}
+			if ( CASW_Marine *pMarine = CASW_Marine::AsMarine( pAnim ) )
+				pMarine->Extinguish( pAttacker, pInflictor );
+			else
+				pAnim->Extinguish();
 		}
 
 		if ( pAlien->IsAlive() && !pAlien->IsFrozen() )
 		{
 			nFrozenStat++;
 		}
-		pAlien->Freeze( flFreezeAmount, pInflictor, NULL );
+		bool bWasFrozen = pAlien->m_bWasEverFrozen;
+		pAlien->Freeze( flFreezeAmount, pAttacker, NULL );
 		nFrozen++;
+		if ( !bWasFrozen && pAlien->IsFrozen() )
+		{
+			IGameEvent *event = gameeventmanager->CreateEvent( "entity_frozen" );
+			if ( event )
+			{
+				event->SetInt( "entindex", pAlien->entindex() );
+				event->SetInt( "attacker", pAttacker ? pAttacker->entindex() : -1 );
+				event->SetInt( "weapon", pInflictor ? pInflictor->entindex() : -1 );
+
+				gameeventmanager->FireEvent( event );
+			}
+		}
 #endif
 	}
 #ifdef GAME_DLL
-	CASW_Marine_Resource *pMR = pInflictorMarine ? pInflictorMarine->GetMarineResource() : NULL;
+	CASW_Marine_Resource *pMR = pAttackerMarine ? pAttackerMarine->GetMarineResource() : NULL;
 	if ( pMR && nFrozenStat )
 	{
 		ADD_STAT( m_iGrenadeFreezeAlien, nFrozenStat );
 	}
-	if ( nFrozen >= 6 && pInflictorMarine && pInflictorMarine->IsInhabited() && pInflictorMarine->GetCommander() )
+	if ( nFrozen >= 6 && pAttackerMarine && pAttackerMarine->IsInhabited() && pAttackerMarine->GetCommander() )
 	{
-		pInflictorMarine->GetCommander()->AwardAchievement( ACHIEVEMENT_ASW_FREEZE_GRENADE );
+		pAttackerMarine->GetCommander()->AwardAchievement( ACHIEVEMENT_ASW_FREEZE_GRENADE );
 		if ( pMR )
 		{
 			pMR->m_bFreezeGrenadeMedal = true;
@@ -6791,17 +6831,72 @@ void CAlienSwarm::ClientCommandKeyValues( edict_t *pEntity, KeyValues *pKeyValue
 	}
 	else if ( FStrEq( szCommand, "EquippedItems" ) )
 	{
-		for ( int i = 0; i < RD_NUM_STEAM_INVENTORY_EQUIP_SLOTS; i++ )
+		int iOffset = pKeyValues->GetInt( "i", -1 );
+		int iTotal = pKeyValues->GetInt( "t", -1 );
+		int iParity = pKeyValues->GetInt( "e", -1 );
+		const char *szData = pKeyValues->GetString( "m", NULL );
+		if ( iOffset < 0 || iTotal < 8 + 2 * RD_NUM_STEAM_INVENTORY_EQUIP_SLOTS || iTotal > RD_EQUIPPED_ITEMS_NOTIFICATION_WORST_CASE_SIZE || ( iTotal & 1 ) || ( iOffset & 1 ) || iParity <= 0 || !szData || !*szData || ( V_strlen( szData ) & 1 ) )
 		{
-			if ( KeyValues *pSlot = pKeyValues->FindKey( ReactiveDropInventory::g_InventorySlotNames[i] ) )
-			{
-				pPlayer->ClearEquippedItemForSlot( ReactiveDropInventory::g_InventorySlotNames[i] );
+			Warning( "Ignoring equipped items notification from player %s (invalid data)\n", pPlayer->GetASWNetworkID() );
+			return;
+		}
 
-				if ( !ReactiveDropInventory::DecodeItemData( pPlayer->m_EquippedItems[i], pSlot->GetString() ) && *pSlot->GetString() != '\0' )
-				{
-					Warning( "Failed to decode player %s item in slot %s.\n", pPlayer->GetASWNetworkID(), ReactiveDropInventory::g_InventorySlotNames[i] );
-				}
+		if ( iOffset == 0 && ASWGameRules() && ASWGameRules()->GetGameState() == ASW_GS_INGAME )
+		{
+			// allow receiving data after mission start if the transfer as at least started beforehand
+			DevWarning( "Ignoring equipped items notification from player %s as the mission is in-progress.\n", pPlayer->GetASWNetworkID() );
+			return;
+		}
+
+		int iLength = V_strlen( szData );
+		if ( iOffset != 0 && ( iParity != pPlayer->m_iEquippedItemsParity || iOffset != pPlayer->m_iEquippedItemsReceivingOffset || iTotal + 1 != pPlayer->m_EquippedItemsReceiving.Count() || iLength + iOffset > iTotal ) )
+		{
+			Assert( iParity == pPlayer->m_iEquippedItemsParity );
+			Assert( iOffset == pPlayer->m_iEquippedItemsReceivingOffset );
+			Assert( iTotal + 1 == pPlayer->m_EquippedItemsReceiving.Count() );
+			Assert( iLength + iOffset <= iTotal );
+			Warning( "Ignoring equipped items notification from player %s (out of order or bad parity)\n", pPlayer->GetASWNetworkID() );
+			return;
+		}
+
+		if ( iOffset == 0 )
+		{
+			ReactiveDropInventory::DecodeItemData( pPlayer->m_EquippedItemsResult, "" );
+			for ( int i = 0; i < RD_NUM_STEAM_INVENTORY_EQUIP_SLOTS; i++ )
+			{
+				pPlayer->m_EquippedItemData[i].Reset();
 			}
+			pPlayer->m_EquippedItemsReceiving.Init( 0, iTotal + 1 );
+			pPlayer->m_iEquippedItemsReceivingOffset = 0;
+			pPlayer->m_iEquippedItemsParity = iParity;
+			Assert( pPlayer->m_EquippedItemsReceiving.Count() == iTotal + 1 );
+		}
+
+		V_memcpy( pPlayer->m_EquippedItemsReceiving.Base() + pPlayer->m_iEquippedItemsReceivingOffset, szData, iLength );
+		pPlayer->m_iEquippedItemsReceivingOffset += iLength;
+		Assert( pPlayer->m_iEquippedItemsReceivingOffset <= iTotal );
+		if ( pPlayer->m_iEquippedItemsReceivingOffset == iTotal )
+		{
+			pPlayer->m_EquippedItemsReceiving.Base()[iTotal] = '\0';
+			CUtlMemory<byte> RawBuffer{ 0, iTotal / 2 };
+			V_hextobinary( pPlayer->m_EquippedItemsReceiving.Base(), iTotal, RawBuffer.Base(), RawBuffer.Count() );
+			CRC32_t iChecksumExpected = CRC32_ProcessSingleBuffer( RawBuffer.Base() + 4, RawBuffer.Count() - 4 );
+			if ( iChecksumExpected != *reinterpret_cast< const CRC32_t * >( RawBuffer.Base() ) )
+			{
+				Warning( "Ignoring equipped items notification from player %s (bad checksum)\n", pPlayer->GetASWNetworkID() );
+			}
+			else
+			{
+				ReactiveDropInventory::DecodeItemData( pPlayer->m_EquippedItemsResult, pPlayer->m_EquippedItemsReceiving.Base() + 8 + RD_NUM_STEAM_INVENTORY_EQUIP_SLOTS * 2 );
+			}
+		}
+		else
+		{
+			CSingleUserRecipientFilter filter{ pPlayer };
+			filter.MakeReliable();
+			UserMessageBegin( filter, "RDEquippedItemsACK" );
+				WRITE_LONG( iParity );
+			MessageEnd();
 		}
 	}
 	else if ( FStrEq( szCommand, "EquippedItemsCached" ) )
@@ -6826,7 +6921,7 @@ void CAlienSwarm::ClientCommandKeyValues( edict_t *pEntity, KeyValues *pKeyValue
 			if ( KeyValues *pSlot = pKeyValues->FindKey( ReactiveDropInventory::g_InventorySlotNames[i] ) )
 			{
 				SteamItemInstanceID_t id = pSlot->GetUint64();
-				pPlayer->ClearEquippedItemForSlot( ReactiveDropInventory::g_InventorySlotNames[i] );
+				pPlayer->m_EquippedItemData[i].Reset();
 
 				FOR_EACH_SUBKEY( pCache, pItem )
 				{
@@ -6835,7 +6930,7 @@ void CAlienSwarm::ClientCommandKeyValues( edict_t *pEntity, KeyValues *pKeyValue
 						continue;
 					}
 
-					pPlayer->SetEquippedItemForSlot( ReactiveDropInventory::g_InventorySlotNames[i], ReactiveDropInventory::ItemInstance_t{ pItem } );
+					pPlayer->m_EquippedItemData[i].SetFromInstance( ReactiveDropInventory::ItemInstance_t{ pItem } );
 
 					break;
 				}
@@ -8475,12 +8570,13 @@ void CAlienSwarm::CheckTechFailure()
 
 		// count number of live techs
 		bool bTech = false;
-		for (int i=0;i<pGameResource->GetMaxMarineResources();i++)
+		for ( int i = 0; i < pGameResource->GetMaxMarineResources(); i++ )
 		{
-			CASW_Marine_Resource *pMR = pGameResource->GetMarineResource(i);
-			if (pMR && pMR->GetHealthPercent() > 0 && pMR->GetProfile() && pMR->GetProfile()->CanHack())
+			CASW_Marine_Resource *pMR = pGameResource->GetMarineResource( i );
+			if ( pMR && pMR->GetHealthPercent() > 0 && pMR->CanHack() )
 			{
 				bTech = true;
+				m_flTechFailureRestartTime = 0; // if we end up cancelling the no-tech failure restart, clear the timer so we can fail again later
 				break;
 			}
 		}

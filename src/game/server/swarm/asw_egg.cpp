@@ -541,21 +541,7 @@ int CASW_Egg::OnTakeDamage( const CTakeDamageInfo &info )
 
 		// Notify gamestats of the damage
 		CASW_GameStats.Event_AlienTookDamage(this, info);
-		if ( pAttacker && pAttacker->IsInhabitableNPC() )
-		{
-			CASW_Inhabitable_NPC *pInhabitableAttacker = assert_cast< CASW_Inhabitable_NPC * >( pAttacker );
-			CASW_ViewNPCRecipientFilter filter{ pInhabitableAttacker };
-			UserMessageBegin( filter, "RDHitConfirm" );
-				WRITE_ENTITY( pAttacker->entindex() );
-				WRITE_ENTITY( entindex() );
-				WRITE_VEC3COORD( info.GetDamagePosition() );
-				WRITE_BOOL( GetHealth() <= 0 );
-				WRITE_BOOL( info.GetDamageType() & DMG_DIRECT );
-				WRITE_BOOL( info.GetDamageType() & DMG_BLAST );
-				WRITE_UBITLONG( pInhabitableAttacker->IRelationType( this ), 3 );
-				WRITE_FLOAT( MIN( info.GetDamage(), iHealthBefore ) );
-			MessageEnd();
-		}
+		UTIL_RD_HitConfirm( this, iHealthBefore, info );
 
 		if ( ( info.GetDamageType() & DMG_BURN ) || ( info.GetDamageType() & DMG_BLAST ) )
 		{

@@ -12,6 +12,7 @@
 #include "basecombatcharacter.h"
 #include "asw_gamerules.h"
 #include "EntityFlame.h"
+#include "rd_inventory_shared.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -469,9 +470,6 @@ bool CASW_Simple_Alien::ApplyGravity(Vector &vecSrc, float deltatime)
 		Vector vecGravityTarget = vecSrc;
 		vecGravityTarget.z -= sv_gravity.GetFloat() * deltatime;
 		// do a trace to the floor
-		Ray_t ray;
-		trace_t trace;
-		CTraceFilterSimple traceFilter(this, GetCollisionGroup() );
 		ray.Init( vecSrc, vecGravityTarget, GetHullMins(), GetHullMaxs() );
 		enginetrace->TraceRay( ray, MASK_NPCSOLID, &traceFilter, &trace );
 
@@ -929,22 +927,7 @@ int CASW_Simple_Alien::OnTakeDamage( const CTakeDamageInfo &info )
 	int iHealthBefore = GetHealth();
 	int iDamage = BaseClass::OnTakeDamage(info);
 
-	CBaseEntity *pAttacker = info.GetAttacker();
-	if ( pAttacker && pAttacker->IsInhabitableNPC() )
-	{
-		CASW_Inhabitable_NPC *pInhabitableAttacker = assert_cast< CASW_Inhabitable_NPC * >( pAttacker );
-		CASW_ViewNPCRecipientFilter filter{ pInhabitableAttacker };
-		UserMessageBegin( filter, "RDHitConfirm" );
-			WRITE_ENTITY( pAttacker->entindex() );
-			WRITE_ENTITY( entindex() );
-			WRITE_VEC3COORD( info.GetDamagePosition() );
-			WRITE_BOOL( GetHealth() <= 0 );
-			WRITE_BOOL( info.GetDamageType() & DMG_DIRECT );
-			WRITE_BOOL( info.GetDamageType() & DMG_BLAST );
-			WRITE_UBITLONG( pInhabitableAttacker->IRelationType( this ), 3 );
-			WRITE_FLOAT( MIN( info.GetDamage(), iHealthBefore ) );
-		MessageEnd();
-	}
+	UTIL_RD_HitConfirm( this, iHealthBefore, info );
 
 	if (iDamage > 0 && GetHealth() > 0)
 	{

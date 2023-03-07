@@ -8,6 +8,7 @@
 #include "iasw_client_usable_entity.h"
 #include "basecombatweapon_shared.h"
 #include "glow_outline_effect.h"
+#include "rd_inventory_shared.h"
 
 class C_ASW_Player;
 class C_ASW_Marine;
@@ -55,6 +56,9 @@ public:
 	virtual const char* GetUTracerType();
 	virtual const char* GetTracerEffectName() { return "tracer_default"; }	// particle effect name
 	virtual const char* GetMuzzleEffectName() { return "muzzle_rifle"; }	// particle effect name
+	virtual const char *GetMagazineGibModelName() const { return NULL; }
+	virtual int GetMagazineGibModelSkin() const { return 0; }
+	virtual void DropMagazineGib();
 	virtual bool Simulate();
 	virtual bool ShouldMarineFlame() { return false; } // if true, the marine emits flames from his flame emitter
 	virtual bool ShouldMarineFireExtinguish() { return false; } // is true, the marine emits fire extinguisher stuff from his emitter
@@ -228,6 +232,9 @@ public:
 	virtual int DisplayClip2() { return Clip2(); }
 	virtual int DisplayMaxClip2() { return GetMaxClip2(); }
 
+	CNetworkVar( AccountID_t, m_iOriginalOwnerSteamAccount );
+	CNetworkVarEmbedded( CRD_ItemInstance, m_InventoryItemData );
+
 private:	
 	C_ASW_Weapon( const C_ASW_Weapon & ); // not defined, not accessible
 
@@ -235,6 +242,13 @@ protected:
 	int m_iEquipmentListIndex;
 
 	CGlowObject m_GlowObject;
+};
+
+class C_RD_Weapon_Accessory : public C_BaseAnimating
+{
+	DECLARE_CLASS( C_RD_Weapon_Accessory, C_BaseAnimating );
+public:
+	int m_iAccessoryIndex;
 };
 
 #endif /* _INCLUDED_C_ASW_WEAPON_H */

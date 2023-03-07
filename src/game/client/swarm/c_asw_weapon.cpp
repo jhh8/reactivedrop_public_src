@@ -56,6 +56,8 @@ BEGIN_NETWORK_TABLE( CASW_Weapon, DT_ASW_Weapon )
 	RecvPropIntWithMinusOneFlag( RECVINFO(m_iClip1 )),
 	RecvPropInt( RECVINFO(m_iPrimaryAmmoType )),
 	RecvPropBool		( RECVINFO( m_bIsTemporaryPickup ) ),
+	RecvPropInt( RECVINFO( m_iOriginalOwnerSteamAccount ) ),
+	RecvPropDataTable( RECVINFO_DT( m_InventoryItemData ), 0, &REFERENCE_RECV_TABLE( DT_RD_ItemInstance ) ),
 END_NETWORK_TABLE()
 
 BEGIN_PREDICTION_DATA( C_ASW_Weapon )
@@ -100,6 +102,11 @@ ConVar glow_outline_color_weapon( "glow_outline_color_weapon", "0 102 192", FCVA
 ConVar rd_tracer_tint_self( "rd_tracer_tint_self", "255 255 255", FCVAR_ARCHIVE, "Tint tracers and muzzle flashes from own marine" );
 ConVar rd_tracer_tint_other( "rd_tracer_tint_other", "255 255 255", FCVAR_ARCHIVE, "Tint tracers and muzzle flashes from other marines" );
 ConVar rd_marine_gear( "rd_marine_gear", "1", FCVAR_NONE, "Draw model overlays for marine gear items" );
+ConVar rd_drop_magazine( "rd_drop_magazine", "1", FCVAR_NONE, "Drop a magazine model when reloading weapons" );
+ConVar rd_drop_magazine_force( "rd_drop_magazine_force", "50", FCVAR_NONE, "Amount of random force to apply to dropped magazine" );
+ConVar rd_drop_magazine_force_up( "rd_drop_magazine_force_up", "50", FCVAR_NONE, "Amount of upward force to apply to the dropped magazine" );
+ConVar rd_drop_magazine_spin( "rd_drop_magazine_spin", "1000", FCVAR_NONE, "Amount of random angular velocity to apply to dropped magazine" );
+ConVar rd_drop_magazine_lifetime( "rd_drop_magazine_lifetime", "4", FCVAR_NONE, "Time before a dropped magazine fades" );
 
 extern ConVar asw_use_particle_tracers;
 extern ConVar muzzleflash_light;
@@ -407,6 +414,46 @@ void C_ASW_Weapon::ProcessMuzzleFlashEvent()
 	OnMuzzleFlashed();	
 }
 
+void C_ASW_Weapon::DropMagazineGib()
+{
+	const char *szModelName = GetMagazineGibModelName();
+	if ( !szModelName )
+		return;
+
+	if ( !rd_drop_magazine.GetBool() )
+		return;
+
+	Vector vecHand;
+	QAngle angHand;
+	Vector vecHandForward;
+
+	GetBonePosition( LookupBone( "ValveBiped.Bip01_R_Hand" ), vecHand, angHand );
+	AngleVectors( angHand, &vecHandForward );
+
+	C_Gib *pGib = C_Gib::CreateClientsideGib( szModelName, vecHand + vecHandForward * BoundingRadius(),
+		RandomVector( -rd_drop_magazine_force.GetFloat(), rd_drop_magazine_force.GetFloat() ) + Vector( 0, 0, rd_drop_magazine_force_up.GetFloat() ),
+		RandomAngularImpulse( -rd_drop_magazine_spin.GetFloat(), rd_drop_magazine_spin.GetFloat() ),
+		rd_drop_magazine_lifetime.GetFloat() );
+	if ( pGib )
+	{
+		pGib->SetSkin( GetMagazineGibModelSkin() );
+	}
+
+	if ( DisplayClipsDoubled() )
+	{
+		GetBonePosition( LookupBone( "ValveBiped.Bip01_L_Hand" ), vecHand, angHand );
+		AngleVectors( angHand, &vecHandForward );
+
+		pGib = C_Gib::CreateClientsideGib( szModelName, vecHand + vecHandForward * BoundingRadius(),
+			RandomVector( -rd_drop_magazine_force.GetFloat(), rd_drop_magazine_force.GetFloat() ) + Vector( 0, 0, rd_drop_magazine_force_up.GetFloat() ),
+			RandomAngularImpulse( -rd_drop_magazine_spin.GetFloat(), rd_drop_magazine_spin.GetFloat() ),
+			rd_drop_magazine_lifetime.GetFloat() );
+		if ( pGib )
+		{
+			pGib->SetSkin( GetMagazineGibModelSkin() );
+		}
+	}
+}
 
 bool C_ASW_Weapon::Simulate()
 {
@@ -658,8 +705,20 @@ bool C_ASW_Weapon::GetUseAction( ASWUseAction &action, C_ASW_Inhabitable_NPC *pU
 	const CASW_WeaponInfo *pInfo = GetWeaponInfo();
 	if ( pInfo )
 	{
+		wchar_t wszWeaponShortName[128];
+		TryLocalize( pInfo->szPrintName, wszWeaponShortName, sizeof( wszWeaponShortName ) );
 		wchar_t wszWeaponName[128];
-		TryLocalize( pInfo->szPrintName, wszWeaponName, sizeof( wszWeaponName ) );
+		if ( m_iOriginalOwnerSteamAccount != 0 && m_InventoryItemData.IsSet() && SteamFriends() )
+		{
+			wchar_t wszPlayerName[128];
+			V_UTF8ToUnicode( SteamFriends()->GetFriendPersonaName( CSteamID( m_iOriginalOwnerSteamAccount, SteamUtils()->GetConnectedUniverse(), k_EAccountTypeIndividual ) ), wszPlayerName, sizeof( wszPlayerName ) );
+			g_pVGuiLocalize->ConstructString( wszWeaponName, sizeof( wszWeaponName ), g_pVGuiLocalize->Find( "#asw_owned_weapon_format" ), 2, wszPlayerName, wszWeaponShortName );
+		}
+		else
+		{
+			V_wcsncpy( wszWeaponName, wszWeaponShortName, sizeof( wszWeaponName ) );
+		}
+
 		if ( m_bSwappingWeapon )
 		{
 			g_pVGuiLocalize->ConstructString( action.wszText, sizeof( action.wszText ), g_pVGuiLocalize->Find( "#asw_swap_weapon_format" ), 1, wszWeaponName );
@@ -995,3 +1054,5 @@ bool C_ASW_Weapon::GroundSecondary()
 {
 	return asw_ground_secondary.GetBool();
 }
+
+LINK_ENTITY_TO_CLASS( rd_weapon_accessory, C_RD_Weapon_Accessory );

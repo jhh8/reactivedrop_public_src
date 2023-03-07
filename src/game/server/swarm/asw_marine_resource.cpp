@@ -24,6 +24,8 @@ LINK_ENTITY_TO_CLASS( asw_marine_resource, CASW_Marine_Resource );
 BEGIN_DATADESC( CASW_Marine_Resource )
 	DEFINE_FIELD( m_MarineProfileIndex, FIELD_INTEGER ),
 	DEFINE_FIELD( m_MarineEntity, FIELD_EHANDLE ),
+	DEFINE_FIELD( m_OriginalCommander, FIELD_EHANDLE ),
+	DEFINE_FIELD( m_bHadOriginalCommander, FIELD_BOOLEAN ),
 	DEFINE_FIELD( m_Commander, FIELD_EHANDLE),	
 	DEFINE_AUTO_ARRAY( m_iWeaponsInSlots, FIELD_INTEGER ),
 	DEFINE_AUTO_ARRAY( m_iInitialWeaponsInSlots, FIELD_INTEGER ),
@@ -77,7 +79,7 @@ BEGIN_DATADESC( CASW_Marine_Resource )
 	DEFINE_FIELD( m_flFinishedMissionTime, FIELD_FLOAT ),
 END_DATADESC()
 
-void *SendProxy_SendMarineResourceTimelinesDataTable( const SendProp *pProp, const void *pStruct, const void *pVarData, CSendProxyRecipients *pRecipients, int objectID )
+static void *SendProxy_SendMarineResourceTimelinesDataTable( const SendProp *pProp, const void *pStruct, const void *pVarData, CSendProxyRecipients *pRecipients, int objectID )
 {
 	if ( ASWGameRules() && ASWGameRules()->GetGameState() == ASW_GS_INGAME )
 	{
@@ -86,6 +88,37 @@ void *SendProxy_SendMarineResourceTimelinesDataTable( const SendProp *pProp, con
 	}
 
 	return ( void * )pVarData;
+}
+
+static void *SendProxy_MarineResourceEquippedSuit( const SendProp *pProp, const void *pStructBase, const void *pData, CSendProxyRecipients *pRecipients, int objectID )
+{
+	static CRD_ItemInstance s_BlankInstance;
+
+	const CASW_Marine_Resource *pMR = static_cast< const CASW_Marine_Resource * >( pStructBase );
+	if ( !pMR->m_OriginalCommander )
+		return &s_BlankInstance;
+
+	return &pMR->m_OriginalCommander->m_EquippedItemData[RD_STEAM_INVENTORY_EQUIP_SLOT_FIRST_MARINE + pMR->m_MarineProfileIndex];
+}
+
+static void *SendProxy_MarineResourceStartingEquip( const SendProp *pProp, const void *pStructBase, const void *pData, CSendProxyRecipients *pRecipients, int objectID )
+{
+	static CRD_ItemInstance s_BlankInstance;
+
+	const CASW_Marine_Resource *pMR = static_cast< const CASW_Marine_Resource * >( pStructBase );
+	if ( !pMR->m_OriginalCommander )
+		return &s_BlankInstance;
+
+	int index = ( const char * )pData - ( const char * )pStructBase;
+	Assert( index >= 0 && index < ASW_NUM_INVENTORY_SLOTS );
+	int iEquip = pMR->m_iInitialWeaponsInSlots[index];
+	if ( iEquip == -1 )
+		iEquip = pMR->m_iWeaponsInSlots[index];
+	CASW_EquipItem *pEquipItem = g_ASWEquipmentList.GetItemForSlot( index, iEquip );
+	if ( !pEquipItem || pEquipItem->m_iInventoryIndex == -1 )
+		return &s_BlankInstance;
+
+	return &pMR->m_OriginalCommander->m_EquippedItemData[pEquipItem->m_iInventoryIndex];
 }
 
 // Only send active weapon index to local player
@@ -104,6 +137,7 @@ IMPLEMENT_SERVERCLASS_ST(CASW_Marine_Resource, DT_ASW_Marine_Resource)
 	SendPropDataTable( "mr_timelines", 0, &REFERENCE_SEND_TABLE(DT_MR_Timelines), SendProxy_SendMarineResourceTimelinesDataTable ),
 	SendPropInt		(SENDINFO(m_MarineProfileIndex), 10 ),
 	SendPropEHandle (SENDINFO(m_MarineEntity) ),
+	SendPropEHandle (SENDINFO(m_OriginalCommander) ),
 	SendPropEHandle (SENDINFO(m_Commander) ),
 	SendPropInt		(SENDINFO(m_iCommanderIndex), 10),
 	SendPropArray( SendPropInt( SENDINFO_ARRAY( m_iWeaponsInSlots ), 30 ), m_iWeaponsInSlots ),
@@ -120,6 +154,10 @@ IMPLEMENT_SERVERCLASS_ST(CASW_Marine_Resource, DT_ASW_Marine_Resource)
 	SendPropInt		(SENDINFO(m_iBotFrags)),
 	SendPropInt		(SENDINFO(m_iScore)),
 	SendPropFloat	(SENDINFO(m_flFinishedMissionTime)),
+	SendPropDataTable( "m_EquippedSuit", 0, &REFERENCE_SEND_TABLE( DT_RD_ItemInstance ), SendProxy_MarineResourceEquippedSuit ),
+	SendPropDataTable( "m_StartingEquipWeapons[0]", 0, &REFERENCE_SEND_TABLE( DT_RD_ItemInstance ), SendProxy_MarineResourceStartingEquip ),
+	SendPropDataTable( "m_StartingEquipWeapons[1]", 1, &REFERENCE_SEND_TABLE( DT_RD_ItemInstance ), SendProxy_MarineResourceStartingEquip ),
+	SendPropDataTable( "m_StartingEquipWeapons[2]", 2, &REFERENCE_SEND_TABLE( DT_RD_ItemInstance ), SendProxy_MarineResourceStartingEquip ),
 END_SEND_TABLE()
 
 extern ConVar asw_leadership_radius;
@@ -133,6 +171,8 @@ CASW_Marine_Resource::CASW_Marine_Resource()
 	m_bAwardedMedals = false;
 	m_MarineProfileIndex = -1;
 	m_bInfested = false;
+	m_bHadOriginalCommander = false;
+	m_OriginalCommander = NULL;
 	SetCommander(NULL);
 	m_bInhabited = false;
 	m_iServerFiring = 0;
@@ -237,13 +277,19 @@ int CASW_Marine_Resource::ShouldTransmit( const CCheckTransmitInfo *pInfo )
 }
 
 
-void CASW_Marine_Resource::SetCommander(CASW_Player* pCommander)
-{	
+void CASW_Marine_Resource::SetCommander( CASW_Player *pCommander )
+{
+	if ( !m_OriginalCommander && !m_bHadOriginalCommander )
+	{
+		m_OriginalCommander = pCommander;
+		m_bHadOriginalCommander = pCommander != NULL;
+	}
+
 	m_Commander = pCommander;
 	m_iCommanderIndex = pCommander ? pCommander->entindex() : -1;
 }
 
-CASW_Player* CASW_Marine_Resource::GetCommander()
+CASW_Player *CASW_Marine_Resource::GetCommander()
 {
 	return m_Commander;
 }
@@ -648,6 +694,15 @@ bool CASW_Marine_Resource::IsReloading()
 		return false;
 
 	return pWeapon->IsReloading();
+}
+
+bool CASW_Marine_Resource::CanHack()
+{
+	CASW_Marine_Profile *pProfile = GetProfile();
+	if ( !pProfile )
+		return false;
+
+	return pProfile->CanHack();
 }
 
 void CASW_Marine_Resource::IncrementWeaponStats( Class_T weaponClass, int32 nDamage, int32 nFFDamage, int32 nShotsFired, int32 nShotsHit, int32 nKills )

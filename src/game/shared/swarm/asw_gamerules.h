@@ -146,7 +146,7 @@ public:
 	// loadout/equip
 	virtual void			LoadoutSelect( CASW_Player *pPlayer, int iRosterIndex, int iInvSlot, int iEquipIndex);
 	virtual bool			CanHaveAmmo( CBaseCombatCharacter *pPlayer, int iAmmoIndex );
-	void GiveStartingWeaponToMarine(CASW_Marine* pMarine, int iEquipIndex, int iSlot);	// gives the specified marine the specified starting gun and default ammo
+	void GiveStartingWeaponToMarine( CASW_Marine *pMarine, int iEquipIndex, int iSlot, bool bAssociateWithAccount = true );	// gives the specified marine the specified starting gun and default ammo
 	void AddBonusChargesToPickups();
 	
 	// spawning/connecting
@@ -251,7 +251,7 @@ public:
 	// custom version of radius damage to hurt marines a little less
 	virtual void RadiusDamage( const CTakeDamageInfo &info, const Vector &vecSrcIn, float flRadius, int iClassIgnore, CBaseEntity *pEntityIgnore );
 	virtual bool ShouldUseRobustRadiusDamage( CBaseEntity *pEntity );
-	void FreezeAliensInRadius( CBaseEntity *pInflictor, float flFreezeAmount, const Vector &vecSrcIn, float flRadius );
+	void FreezeAliensInRadius( CBaseEntity *pAttacker, CBaseEntity *pInflictor, float flFreezeAmount, const Vector &vecSrcIn, float flRadius );
 	void StumbleAliensInRadius( CBaseEntity *pInflictor, const Vector &vecSrcIn, float flRadius );
 	void ShockNearbyAliens( CASW_Marine *pMarine, CASW_Weapon *pWeaponSource );
 			

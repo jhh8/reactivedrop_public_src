@@ -224,6 +224,9 @@ void CASW_Weapon::ItemBusyFrame( void )
 
 				//Msg("%f RELOAD SUCCESS! - bAttack1 = %d, bOldAttack1 = %d\n", gpGlobals->curtime, bAttack1, bOldAttack1 );
 				//Msg( "S: %f - %f - %f RELOAD SUCCESS! -- Progress = %f\n", gpGlobals->curtime, fFastStart, fFastEnd, flProgress );
+
+				pMarine->DoAnimationEvent( PLAYERANIMEVENT_DROP_MAGAZINE_GIB );
+
 #ifdef GAME_DLL				
 				pMarine->GetMarineSpeech()->PersonalChatter( CHATTER_SELECTION );
 #endif
@@ -290,6 +293,7 @@ void CASW_Weapon::ItemBusyFrame( void )
 #endif
 
 				DispatchParticleEffect( "reload_fail", PATTACH_POINT_FOLLOW, this, "muzzle" );
+				pMarine->DoAnimationEvent( PLAYERANIMEVENT_DROP_MAGAZINE_GIB );
 
 #ifdef GAME_DLL	
 				pMarine->GetMarineSpeech()->PersonalChatter( CHATTER_PAIN_SMALL );
@@ -1217,6 +1221,12 @@ void CASW_Weapon::FinishReload( void )
 			gameeventmanager->FireEvent( event );
 		}
 #endif
+
+		if ( !m_bFastReloadSuccess && !m_bFastReloadFailure )
+		{
+			pOwner->DoAnimationEvent( PLAYERANIMEVENT_DROP_MAGAZINE_GIB );
+		}
+
 		m_bFastReloadSuccess = false;
 		m_bFastReloadFailure = false;
 	}
@@ -1277,6 +1287,8 @@ void CASW_Weapon::Precache()
 	BaseClass::Precache();
 
 	PrecacheModel( "models/swarm/Bayonet/bayonet.mdl" );
+	if ( const char *szMagazineGibName = GetMagazineGibModelName() )
+		PrecacheModel( szMagazineGibName );
 	PrecacheScriptSound( "ASW_Rifle.ReloadA" );
 	PrecacheScriptSound( "ASW_Rifle.ReloadB" );
 	PrecacheScriptSound( "ASW_Rifle.ReloadC" );

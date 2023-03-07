@@ -617,21 +617,7 @@ int CASW_Inhabitable_NPC::OnTakeDamage_Alive( const CTakeDamageInfo &info )
 		CASW_GameStats.Event_AlienTookDamage( this, newInfo );
 	}
 
-	if ( pAttacker && pAttacker->IsInhabitableNPC() )
-	{
-		CASW_Inhabitable_NPC *pInhabitableAttacker = assert_cast< CASW_Inhabitable_NPC * >( pAttacker );
-		CASW_ViewNPCRecipientFilter filter{ pInhabitableAttacker };
-		UserMessageBegin( filter, "RDHitConfirm" );
-			WRITE_ENTITY( pAttacker->entindex() );
-			WRITE_ENTITY( entindex() );
-			WRITE_VEC3COORD( newInfo.GetDamagePosition() );
-			WRITE_BOOL( GetHealth() <= 0 );
-			WRITE_BOOL( newInfo.GetDamageType() & DMG_DIRECT );
-			WRITE_BOOL( newInfo.GetDamageType() & DMG_BLAST );
-			WRITE_UBITLONG( pInhabitableAttacker->IRelationType( this ), 3 );
-			WRITE_FLOAT( MIN( newInfo.GetDamage(), iHealthBefore ) );
-		MessageEnd();
-	}
+	UTIL_RD_HitConfirm( this, iHealthBefore, newInfo );
 
 	return result;
 }
@@ -750,6 +736,9 @@ void CASW_Inhabitable_NPC::Freeze( float flFreezeAmount, CBaseEntity *pFreezer, 
 		SetAbsVelocity( vec3_origin );
 		return;
 	}
+
+	if ( !CanBeFullyFrozen() && ( flFreezeAmount > 1.0f || flFreezeAmount * ( 1.0f - m_flFreezeResistance ) + m_flFrozen >= 1.0f ) )
+		return;
 
 	if ( flFreezeAmount > 1.0f )
 	{
