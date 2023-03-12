@@ -247,6 +247,7 @@ IMPLEMENT_SERVERCLASS_ST( CASW_Player, DT_ASW_Player )
 	SendPropBool( SENDINFO( m_bWantsSpectatorOnly ) ),
 	SendPropFloat( SENDINFO( m_flInactiveKickWarning ) ),
 	SendPropDataTable( SENDINFO_DT_NAME( m_EquippedItemData[RD_STEAM_INVENTORY_EQUIP_SLOT_FIRST_MEDAL + 0], m_EquippedMedal ), &REFERENCE_SEND_TABLE( DT_RD_ItemInstance ) ),
+	SendPropDataTable( SENDINFO_DT_NAME( m_EquippedItemData[RD_STEAM_INVENTORY_EQUIP_SLOT_FIRST_MEDAL + 1], m_EquippedMedal2 ), &REFERENCE_SEND_TABLE( DT_RD_ItemInstance ) ),
 END_SEND_TABLE()
 
 BEGIN_DATADESC( CASW_Player )

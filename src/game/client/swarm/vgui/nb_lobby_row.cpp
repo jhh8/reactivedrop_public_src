@@ -68,6 +68,8 @@ CNB_Lobby_Row::CNB_Lobby_Row( vgui::Panel *parent, const char *name ) : BaseClas
 	m_pPromotionIcon->SetVisible( false );
 	m_pMedalIcon = new vgui::ImagePanel( this, "MedalIcon" );
 	m_pMedalIcon->SetVisible( false );
+	m_pMedalIcon2 = new vgui::ImagePanel( this, "MedalIcon2" );
+	m_pMedalIcon2->SetVisible( false );
 
 	m_nLobbySlot = -1;
 
@@ -160,6 +162,7 @@ void CNB_Lobby_Row::UpdateDetails()
 		m_pLevelLabel->SetVisible( false );
 		m_pPromotionIcon->SetVisible( false );
 		m_pMedalIcon->SetVisible( false );
+		m_pMedalIcon2->SetVisible( false );
 		m_pNameDropdown->SetVisible( false );
 		m_pAvatarImage->SetVisible( false );
 		m_pClassLabel->SetVisible( false );
@@ -226,11 +229,12 @@ void CNB_Lobby_Row::UpdateDetails()
 			( ( CAvatarImage * )m_pAvatarImage->GetImage() )->SetPos( -AVATAR_INDENT_X, -AVATAR_INDENT_Y );
 
 			m_pMedalIcon->SetVisible( false );
+			m_pMedalIcon2->SetVisible( false );
 			m_lastMedal = 0;
 		}
 		m_lastSteamID = steamID;
 
-		SteamItemDef_t iMedal = Briefing()->GetEquippedMedal( m_nLobbySlot ).m_iItemDefID;
+		SteamItemDef_t iMedal = Briefing()->GetEquippedMedal( m_nLobbySlot, 1 ).m_iItemDefID;
 		if ( iMedal != m_lastMedal )
 		{
 			if ( iMedal <= 0 )
@@ -243,6 +247,22 @@ void CNB_Lobby_Row::UpdateDetails()
 				m_pMedalIcon->SetImage( pDef->IconSmall );
 				m_pMedalIcon->SetVisible( true );
 				m_lastMedal = iMedal;
+			}
+		}
+
+		SteamItemDef_t iMedal2 = Briefing()->GetEquippedMedal( m_nLobbySlot, 2 ).m_iItemDefID;
+		if ( iMedal2 != m_lastMedal2 )
+		{
+			if ( iMedal2 <= 0 )
+			{
+				m_pMedalIcon2->SetVisible( false );
+				m_lastMedal2 = iMedal2;
+			}
+			else if ( const ReactiveDropInventory::ItemDef_t *pDef = ReactiveDropInventory::GetItemDef( iMedal2 ) )
+			{
+				m_pMedalIcon2->SetImage( pDef->IconSmall );
+				m_pMedalIcon2->SetVisible( true );
+				m_lastMedal2 = iMedal2;
 			}
 		}
 	}
@@ -322,6 +342,7 @@ void CNB_Lobby_Row::UpdateDetails()
 		m_pLevelLabel->SetVisible( false );
 		m_pPromotionIcon->SetVisible( false );
 		m_pMedalIcon->SetVisible( false );
+		m_pMedalIcon2->SetVisible( false );
 		m_pAvatarImage->SetVisible( false );
 
 		int nAvatarX, nAvatarY;
@@ -456,6 +477,7 @@ void CNB_Lobby_Row::CheckTooltip( CNB_Lobby_Tooltip *pTooltip )
 	{
 		pTooltip->ShowMarineMedalTooltip( m_nLobbySlot );
 	}
+	// jh: add medal2 here
 }
 
 extern ConVar developer;

@@ -20,7 +20,7 @@ namespace ReactiveDropInventory
 {
 	constexpr const char *const g_InventorySlotNames[] =
 	{
-		"medal",
+		"medal", "medal2",
 		"marine0", "marine1", "marine2", "marine3",
 		"marine4", "marine5", "marine6", "marine7",
 		"weapon0", "weapon1", "weapon2", "weapon3", "weapon4",
@@ -46,12 +46,12 @@ namespace ReactiveDropInventory
 	};
 #define RD_NUM_STEAM_INVENTORY_EQUIP_SLOTS NELEMS( ReactiveDropInventory::g_InventorySlotNames )
 #define RD_STEAM_INVENTORY_EQUIP_SLOT_FIRST_MEDAL 0
-#define RD_STEAM_INVENTORY_EQUIP_SLOT_FIRST_MARINE 1
-#define RD_STEAM_INVENTORY_EQUIP_SLOT_FIRST_WEAPON 9
+#define RD_STEAM_INVENTORY_EQUIP_SLOT_FIRST_MARINE 2
+#define RD_STEAM_INVENTORY_EQUIP_SLOT_FIRST_WEAPON 10
 #ifdef RD_7A_WEAPONS
-#define RD_STEAM_INVENTORY_EQUIP_SLOT_FIRST_EXTRA 50
+#define RD_STEAM_INVENTORY_EQUIP_SLOT_FIRST_EXTRA 51
 #else
-#define RD_STEAM_INVENTORY_EQUIP_SLOT_FIRST_EXTRA 44
+#define RD_STEAM_INVENTORY_EQUIP_SLOT_FIRST_EXTRA 45
 #endif
 	constexpr const char *const g_InventorySlotAliases[][2] =
 	{

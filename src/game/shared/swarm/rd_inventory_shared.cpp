@@ -1357,7 +1357,8 @@ static void RD_Equipped_Item_Changed( IConVar *var, const char *pOldValue, float
 {
 	s_RD_Inventory_Manager.QueueSendEquipNotification();
 }
-ConVar rd_equipped_medal( "rd_equipped_medal", "0", FCVAR_ARCHIVE | FCVAR_HIDDEN, "Steam inventory item ID of equipped medal.", RD_Equipped_Item_Changed );
+ConVar rd_equipped_medal( "rd_equipped_medal", "0", FCVAR_ARCHIVE | FCVAR_HIDDEN, "Steam inventory item ID of first equipped medal.", RD_Equipped_Item_Changed );
+ConVar rd_equipped_medal2( "rd_equipped_medal2", "0", FCVAR_ARCHIVE | FCVAR_HIDDEN, "Steam inventory item ID of second equipped medal.", RD_Equipped_Item_Changed );
 ConVar rd_equipped_marine[ASW_NUM_MARINE_PROFILES]
 {
 	{ "rd_equipped_marine0", "0", FCVAR_ARCHIVE | FCVAR_HIDDEN, "Steam inventory item ID of equipped replacement for Sarge's suit.", RD_Equipped_Item_Changed },

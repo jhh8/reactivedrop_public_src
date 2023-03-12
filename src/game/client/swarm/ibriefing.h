@@ -67,7 +67,7 @@ public:
 	virtual void AutoSelectFullSquadForSingleplayer( int nFirstSelectedProfileIndex ) = 0;
 
 	virtual void ResetLastChatterTime() = 0;
-	virtual const IBriefing_ItemInstance &GetEquippedMedal( int nLobbySlot ) = 0;
+	virtual const IBriefing_ItemInstance &GetEquippedMedal( int nLobbySlot, int nMedal ) = 0;
 };
 
 #define NUM_BRIEFING_LOBBY_SLOTS MAX( ASW_MAX_MARINE_RESOURCES, MAX_PLAYERS + ASW_NUM_MARINE_PROFILES - 1 ) // was 9, was 4

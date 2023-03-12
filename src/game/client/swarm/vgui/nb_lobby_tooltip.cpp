@@ -176,11 +176,12 @@ void CNB_Lobby_Tooltip::OnTick()
 		return;
 	}
 
+	// jh: 2nd medal here
 	if ( m_bMedalTooltip )
 	{
 		m_pTitle->SetVisible( true );
 
-		const CRD_ItemInstance &details = Briefing()->GetEquippedMedal( m_nLobbySlot );
+		const CRD_ItemInstance &details = Briefing()->GetEquippedMedal( m_nLobbySlot, 1 );
 		if ( details.m_iItemDefID != m_iLastMedal )
 		{
 			const ReactiveDropInventory::ItemDef_t *pDef = ReactiveDropInventory::GetItemDef( details.m_iItemDefID );

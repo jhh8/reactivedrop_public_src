@@ -69,6 +69,7 @@ public:
 	vgui::ImagePanel *m_pVoiceIcon;
 	vgui::ImagePanel *m_pPromotionIcon;
 	vgui::ImagePanel *m_pMedalIcon;
+	vgui::ImagePanel *m_pMedalIcon2;
 	vgui::ImagePanel *m_pChangingSlot[ 4 ];
 
 	char m_szLastWeaponImage[ ASW_NUM_INVENTORY_SLOTS ][ 255 ];
@@ -76,6 +77,7 @@ public:
 	CSteamID m_lastSteamID;
 	int m_nLastPromotion;
 	SteamItemDef_t m_lastMedal;
+	SteamItemDef_t m_lastMedal2;
 
 	int m_nLobbySlot;
 };

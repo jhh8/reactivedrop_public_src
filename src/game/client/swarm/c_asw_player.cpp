@@ -303,6 +303,7 @@ BEGIN_NETWORK_TABLE( C_ASW_Player, DT_ASW_Player )
 	RecvPropBool( RECVINFO( m_bWantsSpectatorOnly ) ),
 	RecvPropFloat( RECVINFO( m_flInactiveKickWarning ) ),
 	RecvPropDataTable( RECVINFO_NOSIZE( m_EquippedMedal ), 0, &REFERENCE_RECV_TABLE( DT_RD_ItemInstance ) ),
+	RecvPropDataTable( RECVINFO_NOSIZE( m_EquippedMedal2 ), 1, &REFERENCE_RECV_TABLE( DT_RD_ItemInstance ) ),
 END_RECV_TABLE()
 
 BEGIN_PREDICTION_DATA( C_ASW_Player )

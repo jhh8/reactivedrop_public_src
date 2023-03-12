@@ -319,6 +319,7 @@ public:
 	CNetworkVar( int, m_iNetworkedXP );
 	CNetworkVar( int, m_iNetworkedPromotion );
 	CNetworkVarEmbedded( CRD_ItemInstance, m_EquippedMedal );
+	CNetworkVarEmbedded( CRD_ItemInstance, m_EquippedMedal2 );
 
 	bool m_bPendingSteamStats;
 	float m_flPendingSteamStatsStart;
