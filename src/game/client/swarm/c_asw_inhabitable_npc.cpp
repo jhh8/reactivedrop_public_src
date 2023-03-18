@@ -33,6 +33,7 @@ IMPLEMENT_CLIENTCLASS_DT( C_ASW_Inhabitable_NPC, DT_ASW_Inhabitable_NPC, CASW_In
 	RecvPropBool( RECVINFO( m_bGlowWhenOccluded ) ),
 	RecvPropBool( RECVINFO( m_bGlowWhenUnoccluded ) ),
 	RecvPropBool( RECVINFO( m_bGlowFullBloom ) ),
+	RecvPropInt( RECVINFO( m_iAlienClassIndex ) ),
 END_RECV_TABLE()
 
 BEGIN_PREDICTION_DATA( C_ASW_Inhabitable_NPC )
@@ -66,6 +67,7 @@ C_ASW_Inhabitable_NPC::C_ASW_Inhabitable_NPC() :
 	m_bElectroStunned = false;
 	m_fNextElectroStunEffect = 0;
 	m_pBurningEffect = NULL;
+	m_iAlienClassIndex = -1;
 }
 
 C_ASW_Inhabitable_NPC::~C_ASW_Inhabitable_NPC()
@@ -175,6 +177,21 @@ void C_ASW_Inhabitable_NPC::ClientThink()
 	}
 
 	UpdateFireEmitters();
+}
+
+void C_ASW_Inhabitable_NPC::PhysicsSimulate()
+{
+	if ( ShouldPredict() )
+	{
+		Assert( GetMoveType() == MOVETYPE_WALK );
+		SetMoveType( MOVETYPE_STEP );
+		BaseClass::PhysicsSimulate();
+		SetMoveType( MOVETYPE_WALK );
+
+		return;
+	}
+
+	BaseClass::PhysicsSimulate();
 }
 
 const Vector &C_ASW_Inhabitable_NPC::GetFacingPoint()

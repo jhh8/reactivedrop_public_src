@@ -398,11 +398,18 @@ BEGIN_ENT_SCRIPTDESC( CASW_Marine, CASW_Inhabitable_NPC, "Marine" )
 	DEFINE_SCRIPTFUNC_NAMED( Script_GetInventoryTable, "GetInventoryTable", "Fills the passed table with the marine's inventory." )
 	DEFINE_SCRIPTFUNC_NAMED( Script_GetMarineName, "GetMarineName", "Returns the marine's name." )
 	DEFINE_SCRIPTFUNC_NAMED( Script_Speak, "Speak", "Makes the marine speak a response rules concept." )
+	DEFINE_SCRIPTFUNC( IsInfested, "Returns true if the marine is infested." )
+	DEFINE_SCRIPTFUNC( IsElectrifiedArmorActive, "Returns true if the marine currently has electrified armor (the effect, not the item)." )
 	DEFINE_SCRIPTFUNC( SetMarineRolls, "Send true to make marine roll, send false to make marine jump" )
 	DEFINE_SCRIPTFUNC( SetKnockedOut, "Used to knock out and incapacitate a marine, or revive them." )
 	DEFINE_SCRIPTFUNC( SetSpawnZombineOnDeath, "Used to spawn a zombine in the place of a marine after death." )
 	DEFINE_SCRIPTFUNC( SetNightVision, "Activate night vision on a marine without needing the equipment." )
 	DEFINE_SCRIPTFUNC_NAMED( ScriptKnockdown, "Knockdown", "Knocks down the marine with desired velocity." )
+	DEFINE_SCRIPTFUNC_NAMED( ScriptOrderHackArea,"OrderHackArea", "Order the marine to hack a computer or button area." )
+	DEFINE_SCRIPTFUNC_NAMED( OrderUseOffhandItem, "OrderUseItem", "Order the marine to use an item (welder, ammo satchel, etc)")
+	DEFINE_SCRIPTFUNC_NAMED( ScriptOrderFollowSquadLeader, "OrderFollowSquadLeader", "Order the marine to follow the squad leader" )
+	DEFINE_SCRIPTFUNC_NAMED( ScriptOrderHoldPosition, "OrderHoldPosition", "Order the marine to stop moving" )
+	DEFINE_SCRIPTFUNC_NAMED( ScriptOrderMoveTo, "OrderMoveTo", "Order the marine to move to a specified position" )
 END_SCRIPTDESC()
 
 extern ConVar weapon_showproficiency;
@@ -4253,7 +4260,8 @@ void CASW_Marine::Event_Killed( const CTakeDamageInfo &info )
 			}
 			if ( !bTech && pGameResource->CountAllAliveMarines() > 0 )
 			{
-				ASWGameRules()->ScheduleTechFailureRestart( gpGlobals->curtime + 1.5f );
+				float flDelay = gEntList.FindEntityByClassname( NULL, "asw_weapon_hack_tool" ) ? 5.0f : 1.5f;
+				ASWGameRules()->ScheduleTechFailureRestart( gpGlobals->curtime + flDelay );
 			}
 		}
 	}

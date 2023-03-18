@@ -456,6 +456,7 @@ public:
 		uint32 size{};
 
 		uint32 nSkippedDefs = 0;
+		const char *szUserLanguage = SteamApps()->GetCurrentGameLanguage();
 
 		FOR_EACH_VEC( ItemDefIDs, i )
 		{
@@ -496,7 +497,6 @@ public:
 				}
 
 				// only cache english (fallback) and the current language preference so we don't waste space on strings we probably won't use
-				const char *szUserLanguage = SteamApps()->GetCurrentGameLanguage();
 				const char *szAfterPrefix;
 #define CHECK_LANGUAGE_PREFIX( szPrefix ) \
 				szAfterPrefix = StringAfterPrefixCaseSensitive( PropertyNames[j], szPrefix ); \
@@ -768,7 +768,7 @@ public:
 #ifdef CLIENT_DLL
 			CRD_ItemInstance &weaponInstance = pWeapon->m_InventoryItemData;
 #else
-			if ( pWeapon->m_iInventoryEquipSlotIndex == -1 )
+			if ( pWeapon->m_iInventoryEquipSlotIndex == -1 || !pWeapon->m_hOriginalOwnerPlayer )
 				return;
 			CRD_ItemInstance &weaponInstance = pWeapon->m_hOriginalOwnerPlayer->m_EquippedItemData[pWeapon->m_iInventoryEquipSlotIndex];
 #endif
@@ -794,6 +794,11 @@ public:
 			{
 				s_RD_Inventory_Manager.IncrementStrangePropertyOnWeaponAndGlobals( pNPC, pData, iAccessoryID, iAmount, iPropertyIndex, bRelative );
 			}
+		}
+		else if ( pWeapon && pWeapon->IsInhabitableNPC() )
+		{
+			// unarmed melee
+			s_RD_Inventory_Manager.IncrementStrangePropertyOnWeaponAndGlobals< CASW_Weapon >( pNPC, NULL, iAccessoryID, iAmount, iPropertyIndex, bRelative );
 		}
 #ifdef DBGFLAG_ASSERT
 		else if ( pWeapon )
@@ -1566,6 +1571,17 @@ public:
 	virtual vgui::HTexture GetID() { return m_iTextureID; }
 	virtual void SetRotation( int iRotation ) {}
 
+	static CSteamItemIcon *Get( const char *szURL )
+	{
+		UtlSymId_t index = s_ItemIcons.Find( szURL );
+		if ( index != s_ItemIcons.InvalidIndex() )
+		{
+			return s_ItemIcons[index];
+		}
+
+		return s_ItemIcons[szURL] = new CSteamItemIcon( szURL );
+	}
+
 private:
 	CRC32_t m_URLHash;
 	vgui::HTexture m_iTextureID;
@@ -2241,24 +2257,14 @@ namespace ReactiveDropInventory
 		FETCH_PROPERTY( "icon_url" );
 		if ( *szValue )
 		{
-			CSteamItemIcon *&pIcon = s_ItemIcons[szValue];
-			if ( pIcon == NULL )
-			{
-				pIcon = new CSteamItemIcon( szValue );
-			}
-			pItemDef->Icon = pIcon;
+			pItemDef->Icon = CSteamItemIcon::Get( szValue );
 		}
 
 		pItemDef->IconSmall = pItemDef->Icon;
 		FETCH_PROPERTY( "icon_url_small" );
 		if ( *szValue )
 		{
-			CSteamItemIcon *&pIcon = s_ItemIcons[szValue];
-			if ( pIcon == NULL )
-			{
-				pIcon = new CSteamItemIcon( szValue );
-			}
-			pItemDef->IconSmall = pIcon;
+			pItemDef->IconSmall = CSteamItemIcon::Get( szValue );
 		}
 
 		pItemDef->StyleIcons.SetCount( pItemDef->StyleNames.Count() );
@@ -2269,12 +2275,7 @@ namespace ReactiveDropInventory
 			FETCH_PROPERTY( szKey );
 			if ( *szValue )
 			{
-				CSteamItemIcon *&pIcon = s_ItemIcons[szValue];
-				if ( pIcon == NULL )
-				{
-					pIcon = new CSteamItemIcon( szValue );
-				}
-				pItemDef->StyleIcons[i] = pIcon;
+				pItemDef->StyleIcons[i] = CSteamItemIcon::Get( szValue );
 			}
 		}
 
@@ -2984,6 +2985,13 @@ void CRD_ItemInstance::FormatDescription( vgui::RichText *pRichText ) const
 	}
 
 	bool bAnyAccessories = false;
+	FormatDescription( wszBuf, sizeof( wszBuf ), pDef->AccessoryDescription );
+	if ( wszBuf[0] )
+	{
+		AppendBBCode( pRichText, wszBuf, rd_briefing_item_accessory_color.GetColor() );
+		pRichText->InsertString( L"\n" );
+		bAnyAccessories = true;
+	}
 	for ( int i = 0; i < RD_ITEM_MAX_ACCESSORIES; i++ )
 	{
 		if ( m_iAccessory[i] == 0 )

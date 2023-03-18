@@ -38,6 +38,7 @@ public:
 
 	virtual bool IsAlien( void ) const { return false; }
 	virtual void ClientThink( void ) override;
+	virtual void PhysicsSimulate() override;
 
 	// health
 	virtual int	GetHealth() const { return m_iHealth; }
@@ -113,6 +114,8 @@ public:
 	CUtlReference<CNewParticleEffect> m_pBurningEffect;
 	void UpdateFireEmitters( void );
 	bool m_bClientOnFire;
+
+	CNetworkVar( int, m_iAlienClassIndex );
 
 private:
 	C_ASW_Inhabitable_NPC( const C_ASW_Inhabitable_NPC & ) = delete; // not defined, not accessible
