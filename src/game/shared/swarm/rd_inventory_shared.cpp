@@ -671,9 +671,9 @@ public:
 				CRD_ItemInstance &weaponInstance = pMR->m_StartingEquipWeapons[j];
 #else
 				CASW_EquipItem *pEquip = g_ASWEquipmentList.GetItemForSlot( j, pMR->m_iInitialWeaponsInSlots[j] );
-				if ( !pEquip || pEquip->m_iInventoryIndex == -1 )
+				if ( !pEquip || pEquip->m_iInventoryEquipIndex == -1 )
 					continue;
-				CRD_ItemInstance &weaponInstance = pPlayer->m_EquippedItemData[pEquip->m_iInventoryIndex];
+				CRD_ItemInstance &weaponInstance = pPlayer->m_EquippedItemData[pEquip->m_iInventoryEquipIndex];
 #endif
 
 				ModifyAccessoryDynamicPropValue( weaponInstance, iAccessoryID, iPropertyIndex, iAmount, bRelative, bAllowCheating );
@@ -2249,8 +2249,8 @@ namespace ReactiveDropInventory
 			pItemDef->AccessoryDescription = szValue;
 
 		FETCH_PROPERTY( "after_description_only_multi_stack" );
-		Assert( !V_strcmp( szValue, "" ) || !V_strcmp( szValue, "true" ) || !V_strcmp( szValue, "false" ) );
-		pItemDef->AfterDescriptionOnlyMultiStack = !V_strcmp( szValue, "true" );
+		Assert( !V_strcmp( szValue, "" ) || !V_strcmp( szValue, "1" ) || !V_strcmp( szValue, "0" ) );
+		pItemDef->AfterDescriptionOnlyMultiStack = !V_strcmp( szValue, "1" );
 
 #ifdef CLIENT_DLL
 		pItemDef->Icon = NULL;

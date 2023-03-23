@@ -2274,6 +2274,17 @@ void CASW_Player::SwitchMarine( CASW_Marine_Resource *pMR, bool set_squad_leader
 	CASW_Marine *pOldMarine = CASW_Marine::AsMarine( GetNPC() );
 	CASW_Marine *pNewMarine = pMR->GetMarineEntity();
 
+	if ( pNewMarine->GetCommander() != this )
+	{
+		if ( pNewMarine->IsInhabited() && pNewMarine->GetCommander() )
+		{
+			pNewMarine->GetCommander()->LeaveMarines();
+		}
+
+		pMR->SetCommander( this );
+		pNewMarine->SetCommander( this );
+	}
+
 	SwitchInhabiting( pNewMarine );
 
 	if ( gpGlobals->curtime > ASWGameRules()->m_fMissionStartedTime + 5.0f )
@@ -2933,8 +2944,15 @@ void OrderNearbyMarines(CASW_Player *pPlayer, ASW_Orders NewOrders, bool bAcknow
 
 		// BenLubar: if player gave follow command, bots will follow not 
 		// using hints 
-		if ( NewOrders == ASW_ORDER_FOLLOW && bAcknowledge && pMyMarine->GetSquadFormation() && pMyMarine->GetSquadFormation()->Leader() == pMyMarine )
+		if ( NewOrders == ASW_ORDER_FOLLOW && bAcknowledge && pMyMarine->GetSquadFormation() )
+		{
+			if ( pMyMarine->GetSquadFormation()->Leader() != pMyMarine )
+			{
+				pMyMarine->GetSquadFormation()->ChangeLeader( pMyMarine, true );
+			}
+
 			pMyMarine->GetSquadFormation()->FollowCommandUsed();
+		}
 
 		// go through all marines and tell them to follow our marine
 		CASW_Game_Resource *pGameResource = ASWGameResource();

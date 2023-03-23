@@ -64,6 +64,7 @@ ConVar asw_floating_number_combine_window( "asw_floating_number_combine_window",
 
 static struct RD_Floating_Damage_Number_t
 {
+	EHANDLE m_hEntity{};
 	float m_flAccumulatedDamage{};
 	float m_flLastDamageNumberTime{};
 	HPARTICLEFFECT m_hDamageNumberParticle{};
@@ -84,6 +85,13 @@ void UpdateHitConfirmRotation()
 	for ( int i = 0; i < MAX_EDICTS; i++ )
 	{
 		HPARTICLEFFECT &hEffect = s_RD_Floating_Damage_Numbers[i].m_hDamageNumberParticle;
+		if ( !hEffect || !s_RD_Floating_Damage_Numbers[i].m_hEntity )
+		{
+			s_RD_Floating_Damage_Numbers[i].m_hEntity.Term();
+			s_RD_Floating_Damage_Numbers[i].m_flAccumulatedDamage = 0;
+			s_RD_Floating_Damage_Numbers[i].m_flLastDamageNumberTime = 0;
+		}
+
 		if ( !hEffect )
 			continue;
 
@@ -101,7 +109,7 @@ void __MsgFunc_RDHitConfirm( bf_read &msg )
 	bool bDamageOverTime = msg.ReadOneBit();
 	bool bBlastDamage = msg.ReadOneBit();
 	int iDisposition = msg.ReadUBitLong( 3 );
-	float flDamage = msg.ReadFloat();
+	float flDamage = int( msg.ReadFloat() );
 	short weaponindex = msg.ReadShort();
 
 	Assert( entindex >= -1 && entindex < MAX_EDICTS );
@@ -200,7 +208,7 @@ void __MsgFunc_RDHitConfirm( bf_read &msg )
 				bIsAccumulated = true;
 				flDamage += accumulator.m_flAccumulatedDamage;
 				CNewParticleEffect *pParticle = accumulator.m_hDamageNumberParticle.GetObject();
-				if ( pParticle )
+				if ( pParticle && pAttacker && pAttacker->ParticleProp()->FindEffect( pParticle ) != -1 )
 				{
 					pAttacker->ParticleProp()->StopEmissionAndDestroyImmediately( pParticle );
 				}
@@ -223,6 +231,7 @@ void __MsgFunc_RDHitConfirm( bf_read &msg )
 		HPARTICLEFFECT hParticle = UTIL_ASW_ParticleDamageNumber( pAttacker, vecDamagePosition, flDamage, iDmgCustom, bDamageOverTime ? 0.5f : 1.0f, bBlastDamage || bDamageOverTime, bIsAccumulated );
 		if ( targetent >= 0 && targetent < MAX_EDICTS && !bBlastDamage && !bDamageOverTime )
 		{
+			s_RD_Floating_Damage_Numbers[targetent].m_hEntity = pTarget;
 			s_RD_Floating_Damage_Numbers[targetent].m_hDamageNumberParticle = hParticle;
 		}
 	}
