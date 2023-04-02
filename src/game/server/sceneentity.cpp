@@ -264,6 +264,7 @@ public:
 	} 	
 };
 CChoreoStringPool g_ChoreoStringPool;
+IChoreoStringPool *g_pChoreoStringPool = &g_ChoreoStringPool;
 
 //-----------------------------------------------------------------------------
 // Purpose: Singleton scene manager.  Created by first placed scene or recreated it it's deleted for some unknown reason
@@ -3497,16 +3498,23 @@ CChoreoScene *CSceneEntity::LoadScene( const char *filename, IChoreoEventCallbac
 	Q_SetExtension( loadfile, ".vcd", sizeof( loadfile ) );
 	Q_FixSlashes( loadfile );
 
-	// binary compiled vcd
-	byte *pBuffer;
+	byte *pBuffer = NULL;
+	CChoreoScene *pScene;
 	int fileSize;
+	bool bLoadedFromScenesImage = true;
+
 	if ( !CopySceneFileIntoMemory( loadfile, &pBuffer, &fileSize ) )
 	{
-		MissingSceneWarning( loadfile );
-		return NULL;
+		bLoadedFromScenesImage = false;
+		fileSize = filesystem->ReadFileEx( loadfile, "GAME", ( void ** )&pBuffer, true, true );
+		if ( fileSize <= 0 )
+		{
+			MissingSceneWarning( loadfile );
+			return NULL;
+		}
 	}
 
-	CChoreoScene *pScene = new CChoreoScene( NULL );
+	pScene = new CChoreoScene( NULL );
 	CUtlBuffer buf( pBuffer, fileSize, CUtlBuffer::READ_ONLY );
 	if ( !pScene->RestoreFromBinaryBuffer( buf, loadfile, &g_ChoreoStringPool ) )
 	{
@@ -3514,13 +3522,22 @@ CChoreoScene *CSceneEntity::LoadScene( const char *filename, IChoreoEventCallbac
 		delete pScene;
 		pScene = NULL;
 	}
-	else
+
+	if ( pScene )
 	{
 		pScene->SetPrintFunc( LocalScene_Printf );
 		pScene->SetEventCallbackInterface( pCallback );
 	}
 
-	FreeSceneFileMemory( pBuffer );
+	if ( bLoadedFromScenesImage )
+	{
+		FreeSceneFileMemory( pBuffer );
+	}
+	else
+	{
+		filesystem->FreeOptimalReadBuffer( pBuffer );
+	}
+
 	return pScene;
 }
 

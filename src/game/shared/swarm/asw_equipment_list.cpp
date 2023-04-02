@@ -291,7 +291,7 @@ static CASW_EquipItem s_RegularEquips[ASW_NUM_EQUIP_REGULAR] =
 	},
 	{
 		ASW_EQUIP_HEAVY_RIFLE, WEAPON_NAME( heavy_rifle ),
-		true, false, "ASW_HR", "",
+		true, false, "ASW_HR", "ASW_HR_G",
 		"swarm/EquipIcons/EquipHeavyRifle",
 		&asw_ammo_count_heavy_rifle, &asw_ammo_count_heavy_rifle_charge,
 	},
@@ -620,7 +620,7 @@ CASW_EquipItem *CASW_EquipmentList::GetEquipItemFor( const char *szWeaponClass )
 
 CASW_EquipItem *CASW_EquipmentList::GetRegular( int index )
 {
-	Assert( index >= 0 && index < NELEMS( s_RegularEquips ) );
+	Assert( index >= -1 && index < int( NELEMS( s_RegularEquips ) ) );
 	if ( index < 0 || index >= NELEMS( s_RegularEquips ) )
 		return NULL;
 
@@ -634,7 +634,7 @@ int CASW_EquipmentList::GetNumRegular( bool bIncludeHidden )
 
 CASW_EquipItem *CASW_EquipmentList::GetExtra( int index )
 {
-	Assert( index >= 0 && index < NELEMS( s_ExtraEquips ) );
+	Assert( index >= -1 && index < int( NELEMS( s_ExtraEquips ) ) );
 	if ( index < 0 || index >= NELEMS( s_ExtraEquips ) )
 		return NULL;
 

@@ -47,6 +47,7 @@ public:
 	virtual bool SecondaryAttackEqualsPrimary() { return false; }
 	virtual bool IsPredicted( void ) const;
 	virtual bool ViewModelIsMarineAttachment() const { return false; }
+	virtual bool ViewModelHidesMarineBodyGroup1() const { return false; }
 	void PlaySoundDirectlyToOwner( const char *szSoundName );
 	void PlaySoundToOthers( const char *szSoundName );
 
@@ -67,6 +68,7 @@ public:
 	virtual void ClearIsFiring();
 	virtual void GetButtons(bool& bAttack1, bool& bAttack2, bool& bReload, bool& bOldReload, bool& bOldAttack1 );
 	bool Holster( CBaseCombatWeapon *pSwitchingTo );
+	virtual const char *GetEquipSound();
 	virtual void Equip(CBaseCombatCharacter *pOwner);
 	virtual void			SetWeaponVisible( bool visible );
 	virtual void ApplyWeaponSwitchTime(float fSwitchDelay);

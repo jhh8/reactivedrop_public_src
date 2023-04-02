@@ -1582,3 +1582,48 @@
 	"pitch"			"95, 105"
 	"wave"			"@weapons\2D\heavyrifle\singleshotfp.wav"
 }
+
+"ASW_Weapon_HeavyRifle.ChargeOn"
+{
+	"channel"		"CHAN_WEAPON"
+	"soundlevel"	"SNDLVL_95dB"
+	"volume"		"0.8"
+	"pitch"			"95,105"
+	"wave"			"weapons\3D\heavyrifle\charge_on.wav"
+}
+
+"ASW_Weapon_HeavyRifle.ChargeOff"
+{
+	"channel"		"CHAN_WEAPON"
+	"soundlevel"	"SNDLVL_95dB"
+	"volume"		"0.8"
+	"pitch"			"95,105"
+	"wave"			"weapons\3D\heavyrifle\charge_off.wav"
+}
+
+"ASW_Weapon.AttachmentEquipSmall"
+{
+	"channel"		"CHAN_ITEM"
+	"soundlevel"	"SNDLVL_NORM"
+	"volume"		"0.8"
+	"pitch"			"85,115"
+	"rndwave"
+	{
+		"wave"		"items/small_pickup1.wav"
+		"wave"		"items/small_pickup2.wav"
+		"wave"		"items/small_pickup3.wav"
+	}
+}
+
+"ASW_Weapon.AttachmentEquipLarge"
+{
+	"channel"		"CHAN_ITEM"
+	"soundlevel"	"SNDLVL_NORM"
+	"volume"		"0.8"
+	"pitch"			"85,115"
+	"rndwave"
+	{
+		"wave"		"items/large_pickup1.wav"
+		"wave"		"items/large_pickup2.wav"
+	}
+}

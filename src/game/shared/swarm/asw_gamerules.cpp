@@ -1025,15 +1025,16 @@ void CAlienSwarmProxy::InputAddPoints( inputdata_t & inputdata )
 		pMR->m_TimelineScore.RecordValue( iTotal - pMR->m_iScore );
 		pMR->m_iScore = iTotal;
 
+		CASW_Marine *pMarine = pMR->GetMarineEntity();
+		if ( pMarine )
+		{
+			pMarine->m_TotalPoints.Set( pMR->m_iScore, inputdata.pActivator, inputdata.pCaller );
+		}
+
 		iMaxScore = MAX( iMaxScore, pMR->m_iScore );
 	}
 
 	m_TotalPoints.Set( iMaxScore, inputdata.pActivator, inputdata.pCaller );
-
-	CBroadcastRecipientFilter filter;
-	UserMessageBegin( filter, "ShowObjectives" );
-	WRITE_FLOAT( 30.0f );
-	MessageEnd();
 }
 
 void CAlienSwarmProxy::InputModifyDifficulty( inputdata_t & inputdata )
@@ -1354,6 +1355,7 @@ CAlienSwarm::CAlienSwarm()
 	m_fDeathCamYawAngleOffset = 0.0f;
 	m_iPreviousGameState = 200;
 	m_iPreviousMissionWorkshopID = 999999; // impossible workshop ID
+	m_bShouldSaveChangedLoadout = false;
 
 	engine->SetPitchScale( rd_sound_pitch_scale.GetFloat() );
 
@@ -1452,8 +1454,9 @@ void CAlienSwarm::OnDataChanged( DataUpdateType_t updateType )
 
 		if ( GetGameState() == ASW_GS_INGAME )
 		{
-			if ( rd_write_config_on_mission_start.GetBool() )
+			if ( rd_write_config_on_mission_start.GetBool() && m_bShouldSaveChangedLoadout )
 			{
+				m_bShouldSaveChangedLoadout = false;
 				engine->ClientCmd_Unrestricted( "host_writeconfig" );
 			}
 			g_ReactiveDropWorkshop.OnMissionStart();
@@ -2829,37 +2832,10 @@ void CAlienSwarm::StartMission()
 	}
 
 	AddBonusChargesToPickups();
-	if( g_pScriptVM )
+
+	if ( g_pScriptVM )
 	{
-		HSCRIPT hMissionStartFunc = g_pScriptVM->LookupFunction( "OnMissionStart" );
-		if ( hMissionStartFunc )
-		{
-			ScriptStatus_t nStatus = g_pScriptVM->Call( hMissionStartFunc, NULL, false, NULL );
-			if ( nStatus != SCRIPT_DONE )
-			{
-				DevWarning( "OnMissionStart VScript function did not finish!\n" );
-			}
-			g_pScriptVM->ReleaseFunction( hMissionStartFunc );
-		}
-
-		if ( g_pScriptVM->ValueExists( "g_ModeScript" ) )
-		{
-			ScriptVariant_t hModeScript;
-			if ( g_pScriptVM->GetValue( "g_ModeScript", &hModeScript ) )
-			{
-				if ( HSCRIPT hFunction = g_pScriptVM->LookupFunction( "OnMissionStart", hModeScript ) )
-				{
-					ScriptStatus_t nStatus = g_pScriptVM->Call( hFunction, hModeScript, false, NULL );
-					if ( nStatus != SCRIPT_DONE )
-					{
-						DevWarning( "OnMissionStart VScript function did not finish!\n" );
-					}
-
-					g_pScriptVM->ReleaseFunction( hFunction );
-				}
-				g_pScriptVM->ReleaseValue( hModeScript );
-			}
-		}
+		RunScriptFunctionInListenerScopes( "OnMissionStart", NULL, 0, NULL );
 	}
 	if ( g_pSwarmProxy )
 	{
@@ -2959,37 +2935,10 @@ void CAlienSwarm::UpdateLaunching()
 			CASW_Use_Area *pArea = static_cast< CASW_Use_Area* >( IASW_Use_Area_List::AutoList()[ i ] );
 			pArea->UpdateWaitingForInput();
 		}
-		if( g_pScriptVM )
+
+		if ( g_pScriptVM )
 		{
-			HSCRIPT hGameplayStartFunc = g_pScriptVM->LookupFunction( "OnGameplayStart" );
-			if ( hGameplayStartFunc )
-			{
-				ScriptStatus_t nStatus = g_pScriptVM->Call( hGameplayStartFunc, NULL, false, NULL );
-				if ( nStatus != SCRIPT_DONE )
-				{
-					DevWarning( "OnGameplayStart VScript function did not finish!\n" );
-				}
-				g_pScriptVM->ReleaseFunction( hGameplayStartFunc );
-			}
-
-			if ( g_pScriptVM->ValueExists( "g_ModeScript" ) )
-			{
-				ScriptVariant_t hModeScript;
-				if ( g_pScriptVM->GetValue( "g_ModeScript", &hModeScript ) )
-				{
-					if ( HSCRIPT hFunction = g_pScriptVM->LookupFunction( "OnGameplayStart", hModeScript ) )
-					{
-						ScriptStatus_t nStatus = g_pScriptVM->Call( hFunction, hModeScript, false, NULL );
-						if ( nStatus != SCRIPT_DONE )
-						{
-							DevWarning( "OnGameplayStart VScript function did not finish!\n" );
-						}
-
-						g_pScriptVM->ReleaseFunction( hFunction );
-					}
-					g_pScriptVM->ReleaseValue( hModeScript );
-				}
-			}
+			RunScriptFunctionInListenerScopes( "OnGameplayStart", NULL, 0, NULL );
 		}
 	}
 	else
@@ -9665,52 +9614,6 @@ void CAlienSwarm::ApplyChallengeConVars( KeyValues *pKV )
 	}
 }
 
-class CASW_Challenge_Thinker : public CLogicalEntity
-{
-public:
-	DECLARE_CLASS( CASW_Challenge_Thinker, CLogicalEntity );
-
-	CASW_Challenge_Thinker()
-	{
-		m_iszScriptThinkFunction = AllocPooledString( "Update" );
-	}
-
-	virtual void RunVScripts()
-	{
-		if ( ValidateScriptScope() )
-		{
-			// https://github.com/ReactiveDrop/reactivedrop_public_src/issues/138
-			// We need to make sure our scope includes every value that might be looked up from it.
-			// If we don't, global variables will be inherited by our scope and functions will be run twice.
-
-			HSCRIPT hScope = GetScriptScope();
-			Assert( hScope );
-			for ( int i = 0; i < NUM_SCRIPT_GAME_EVENTS; i++ )
-			{
-				g_pScriptVM->SetValue( hScope, CFmtStr( "OnGameEvent_%s", g_ScriptGameEventList[i] ), SCRIPT_VARIANT_NULL );
-			}
-			g_pScriptVM->SetValue( hScope, "OnTakeDamage_Alive_Any", SCRIPT_VARIANT_NULL );
-			g_pScriptVM->SetValue( hScope, "UserConsoleCommand", SCRIPT_VARIANT_NULL );
-			g_pScriptVM->SetValue( hScope, "OnMissionStart", SCRIPT_VARIANT_NULL );
-			g_pScriptVM->SetValue( hScope, "OnGameplayStart", SCRIPT_VARIANT_NULL );
-		}
-
-		BaseClass::RunVScripts();
-	}
-
-	virtual void UpdateOnRemove()
-	{
-		if ( GetScriptScope() )
-		{
-			g_pScriptVM->SetValue( "g_ModeScript", SCRIPT_VARIANT_NULL );
-		}
-
-		BaseClass::UpdateOnRemove();
-	}
-};
-
-LINK_ENTITY_TO_CLASS( asw_challenge_thinker, CASW_Challenge_Thinker );
-
 void CAlienSwarm::ApplyChallenge()
 {
 	if ( IsTutorialMap() )
@@ -9746,12 +9649,14 @@ void CAlienSwarm::ApplyChallenge()
 		return;
 	}
 
-	CASW_Challenge_Thinker *pThinker = assert_cast<CASW_Challenge_Thinker *>( CreateEntityByName( "asw_challenge_thinker" ) );
+	CBaseEntity *pThinker = CreateEntityByName( "asw_challenge_thinker" );
 	if ( !pThinker )
 	{
 		Error( "Could not create challenge thinker!\n" );
 		return;
 	}
+
+	pThinker->SetName( AllocPooledString( "g_ModeScript" ) );
 	pThinker->m_iszVScripts = AllocPooledString( CFmtStr( "challenge_%s", rd_challenge.GetString() ) );
 	if ( !pThinker->ValidateScriptScope() )
 	{

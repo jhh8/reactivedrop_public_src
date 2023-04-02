@@ -30,10 +30,12 @@ public:
 #ifndef CLIENT_DLL
 	DECLARE_DATADESC();
 #else
-	
+	virtual void ClientThink() override;
 #endif
 	int GetRocketsToFire() { return m_iRocketsToFire.Get(); }
 	float GetNextLaunchTime() { return m_flNextLaunchTime.Get(); }
+	const char *GetEquipSound() override { return "ASW_Weapon.AttachmentEquipSmall"; }
+	virtual bool ViewModelIsMarineAttachment() const { return true; }
 	virtual void FireRocket();
 	virtual bool IsOffensiveWeapon() { return false; }
 	virtual bool OffhandActivate();
