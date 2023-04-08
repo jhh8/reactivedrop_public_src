@@ -67,6 +67,7 @@ const int HEADCRAB_MAX_JUMP_DIST = 256;
 #define HEADCRAB_BURN_SOUND_FREQUENCY 10
 
 ConVar g_debug_headcrab( "g_debug_headcrab", "0", FCVAR_CHEAT );
+ConVar rd_headcrab_waterproof( "rd_headcrab_waterproof", "0", FCVAR_CHEAT, "Headcrabs don't drown in water." );
 extern ConVar asw_debug_alien_damage;
 
 //------------------------------------
@@ -893,7 +894,7 @@ void CBaseHeadcrab::LeapTouch( CBaseEntity *pOther )
 //-----------------------------------------------------------------------------
 int CBaseHeadcrab::CalcDamageInfo( CTakeDamageInfo *pInfo )
 {
-	pInfo->Set( this, this, sk_headcrab_melee_dmg.GetFloat(), DMG_SLASH );
+	pInfo->Set( this, this, ASWGameRules()->ModifyAlienDamageBySkillLevel( sk_headcrab_melee_dmg.GetFloat() ), DMG_SLASH );
 	CalculateMeleeDamageForce( pInfo, GetAbsVelocity(), GetAbsOrigin() );
 	return pInfo->GetDamage();
 }
@@ -940,7 +941,7 @@ void CBaseHeadcrab::GatherConditions( void )
 
 	BaseClass::GatherConditions();
 
-	if( m_lifeState == LIFE_ALIVE && GetWaterLevel() > 1 )
+	if ( m_lifeState == LIFE_ALIVE && GetWaterLevel() > 1 && !rd_headcrab_waterproof.GetBool() )
 	{
 		// Start Drowning!
 		SetCondition( COND_HEADCRAB_IN_WATER );
@@ -3165,18 +3166,18 @@ void CBlackHeadcrab::TouchDamage( CBaseEntity *pOther )
 				if ( pOther->Classify() == CLASS_ASW_MARINE )
 				{
 					// That didn't finish them. Take them down to one point with poison damage. It'll heal.
-					pOther->TakeDamage( CTakeDamageInfo( this, this, pOther->m_iHealth - 1, DMG_POISON ) );
+					pOther->TakeDamage( CTakeDamageInfo( this, this, pOther->m_iHealth - 1, DMG_POISON | DMG_PREVENT_PHYSICS_FORCE ) );
 				}
 				else
 				{
 					// Just take some amount of slash damage instead
-					pOther->TakeDamage( CTakeDamageInfo( this, this, sk_headcrab_poison_npc_damage.GetFloat(), DMG_SLASH ) );
+					pOther->TakeDamage( CTakeDamageInfo( this, this, ASWGameRules()->ModifyAlienDamageBySkillLevel( sk_headcrab_poison_npc_damage.GetFloat() ), DMG_SLASH ) );
 				}
 			}
 			else
 			{
 				// That didn't finish them. Take them down to one point with poison damage. It'll heal.
-				pOther->TakeDamage( CTakeDamageInfo( this, this, pOther->m_iHealth - 1, DMG_POISON ) );
+				pOther->TakeDamage( CTakeDamageInfo( this, this, pOther->m_iHealth - 1, DMG_POISON | DMG_PREVENT_PHYSICS_FORCE ) );
 			}
 		}
 	}
