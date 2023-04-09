@@ -260,7 +260,7 @@
 	"wave"			"*#music/rd-lan4_vent-labymusic.mp3"
 }
 
-"Lana.VentBattle"
+"Lana04_vents.catwalk_battle"
 {
 	"channel"		"CHAN_STATIC"
 	"volume"		"1"
@@ -279,7 +279,7 @@
 
 	"soundlevel"	"SNDLVL_NONE"
 
-	"wave"	"*#music/a4_tanker_arena_combat2_lana.mp3"
+	"wave"	"*#music/a4_tanker_vault_catch_lana.mp3"
 }
 
 // =========================
@@ -628,14 +628,14 @@
 	"volume"		"1.0"
 	"pitch"			"100"
 
-	"soundlevel"		"SNDLVL_NONE"
+	"soundlevel"		"SNDLVL_90dB"
 
-	"wave"			"music/hlvr_a5_vault_hallway_gravity.wav"
+	"wave"			")music/hlvr_a5_vault_hallway_gravity.wav"
 }
 "Accident32.MuonGemLoopFight"
 {
 	"channel"		"CHAN_STATIC"
-	"volume"		"1.0"
+	"volume"		"0.9"
 	"pitch"			"100"
 
 	"soundlevel"		"SNDLVL_NONE"
@@ -645,7 +645,7 @@
 "Accident32.MuonGemStinger"
 {
 	"channel"		"CHAN_STATIC"
-	"volume"		"1.0"
+	"volume"		"0.9"
 	"pitch"			"100"
 
 	"soundlevel"		"SNDLVL_NONE"
