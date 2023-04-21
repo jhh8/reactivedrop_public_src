@@ -112,13 +112,8 @@
 #include "matchmaking/swarm/imatchext_swarm.h"
 #include "asw_gamerules.h"
 #include "asw_util_shared.h"
+#include "iconsistency.h"
 #endif
-
-
-
-
-
-
 
 #ifdef _WIN32
 #include "IGameUIFuncs.h"
@@ -186,6 +181,7 @@ IBlackBox *blackboxrecorder = NULL;
 #ifdef INFESTED_DLL
 IASW_Mission_Chooser *missionchooser = NULL;
 IMatchExtSwarm *g_pMatchExtSwarm = NULL;
+IConsistency *consistency = NULL;
 #endif
 
 IGameSystem *SoundEmitterSystem();
@@ -572,6 +568,10 @@ static bool InitGameSystems( CreateInterfaceFn appSystemFactory )
 	// Add VScript game event listener system
 	IGameSystem::Add( g_pScriptGameEventListener );
 
+#ifdef INFESTED_DLL
+	consistency->ConnectServer( Sys_GetFactoryThis() );
+#endif
+
 #ifdef SERVER_USES_VGUI
 	// Startup vgui
 	if ( enginevgui )
@@ -583,8 +583,6 @@ static bool InitGameSystems( CreateInterfaceFn appSystemFactory )
 
 	// load Mod specific game events ( MUST be before InitAllSystems() so it can pickup the mod specific events)
 	gameeventmanager->LoadEventsFromFile("resource/ModEvents.res");
-
-
 
 	if ( !IGameSystem::InitAllSystems() )
 		return false;
@@ -700,6 +698,8 @@ bool CServerGameDLL::DLLInit( CreateInterfaceFn appSystemFactory,
 		return false;
 	if ( (g_pMatchExtSwarm = (IMatchExtSwarm *)appSystemFactory(IMATCHEXT_SWARM_INTERFACE, NULL)) == NULL )
 		return false;
+	if ( ( consistency = ( IConsistency * )appSystemFactory( INTERFACEVERSION_ICONSISTENCY_V3, NULL ) ) == NULL )
+		return false;
 #endif
 
 	if ( !g_pMatchFramework )
@@ -775,8 +775,6 @@ bool CServerGameDLL::DLLInit( CreateInterfaceFn appSystemFactory,
 	g_pGameSaveRestoreBlockSet->AddBlockHandler( GetEventQueueSaveRestoreBlockHandler() );
 	g_pGameSaveRestoreBlockSet->AddBlockHandler( GetAchievementSaveRestoreBlockHandler() );
 	g_pGameSaveRestoreBlockSet->AddBlockHandler( GetVScriptSaveRestoreBlockHandler() );
-
-
 
 	bool bInitSuccess = false;
 	if ( sv_threaded_init.GetBool() )
@@ -3470,6 +3468,7 @@ public:
 		AddAppSystem( "scenefilecache", SCENE_FILE_CACHE_INTERFACE_VERSION );
 #ifdef INFESTED_DLL
 		AddAppSystem( "missionchooser", ASW_MISSION_CHOOSER_VERSION );
+		AddAppSystem( "consistency", INTERFACEVERSION_ICONSISTENCY_V3 );
 #endif
 	}
 

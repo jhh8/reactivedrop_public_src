@@ -458,6 +458,8 @@ ConVar asw_marine_special_idle_chatter_chance( "asw_marine_special_idle_chatter_
 ConVar asw_force_ai_fire("asw_force_ai_fire", "0", FCVAR_CHEAT, "Forces all AI marines to fire constantly");
 ConVar asw_realistic_death_chatter( "asw_realistic_death_chatter", "0", FCVAR_CHEAT, "If true, only 1 nearby marine will shout about marine deaths" );
 ConVar asw_god( "asw_god", "0", FCVAR_CHEAT, "Set to 1 to make marines invulnerable" );
+ConVar asw_god_effects( "asw_god_effects", "0", FCVAR_CHEAT, "If 1, marine health will not be affected by damage, but they will still take other effects" );
+ConVar asw_marine_damage_force_scale( "asw_marine_damage_force_scale", "0", FCVAR_CHEAT, "Damage force in marine damage is applied as a velocity impulse scaled by this factor" );
 ConVar rd_infinite_ammo( "rd_infinite_ammo", "0", FCVAR_CHEAT, "Marine's active weapon will never run out of ammo" );
 extern ConVar asw_sentry_friendly_fire_scale;
 extern ConVar asw_marine_ff_absorption;
@@ -1632,6 +1634,8 @@ int CASW_Marine::OnTakeDamage_Alive( const CTakeDamageInfo &info )
 	CASW_GameStats.Event_MarineTookDamage( this, newInfo );
 	int result = BaseClass::OnTakeDamage_Alive( newInfo );
 	int iDamageTaken = MAX( iPreDamageHealth, 0 ) - MAX( GetHealth(), 0 );
+	if ( asw_god_effects.GetBool() )
+		SetHealth( iPreDamageHealth );
 
 	if (asw_debug_marine_damage.GetBool() && result > 0)
 		Msg("  Marine took final damage: %f of type %d\n", newInfo.GetDamage(), newInfo.GetDamageType());
@@ -1901,7 +1905,18 @@ int CASW_Marine::OnTakeDamage_Alive( const CTakeDamageInfo &info )
 				GetMarineSpeech()->PersonalChatter(CHATTER_PAIN_SMALL);
 
 			m_fNextPainSoundTime = gpGlobals->curtime + fPainInterval;
-		}		
+		}
+
+		if ( asw_marine_damage_force_scale.GetFloat() != 0 )
+		{
+			// make sure it's not too big of an acceleration or it'll just be ignored
+			Vector vecImpulse = newInfo.GetDamageForce() * asw_marine_damage_force_scale.GetFloat();
+			float flSpeed = vecImpulse.Length();
+			if ( flSpeed > k_flMaxEntitySpeed )
+				vecImpulse *= k_flMaxEntitySpeed / flSpeed;
+
+			ApplyAbsVelocityImpulse( vecImpulse );
+		}
 	}
 
 	return result;
@@ -5742,7 +5757,7 @@ bool CASW_Marine::TeleportToFreeNode( CASW_Marine *pTarget, float fNearestDist )
 				CollisionProp()->OBBMaxs(),
 				MASK_PLAYERSOLID,
 				this,
-				COLLISION_GROUP_NONE,
+				COLLISION_GROUP_PLAYER_MOVEMENT,
 				&tr );
 			if ( tr.fraction != 1.0 )
 			{
@@ -5754,9 +5769,9 @@ bool CASW_Marine::TeleportToFreeNode( CASW_Marine *pTarget, float fNearestDist )
 				// make sure we have line of sight
 				UTIL_TraceLine( pTarget->GetAbsOrigin() + Vector( 0, 0, 40 ),
 					vecPos + Vector( 0, 0, 40 ),
-					MASK_PLAYERSOLID_BRUSHONLY,
+					MASK_PLAYERSOLID,
 					this,
-					COLLISION_GROUP_NONE,
+					COLLISION_GROUP_PLAYER_MOVEMENT,
 					&tr );
 				if ( tr.fraction != 1.0 )
 				{

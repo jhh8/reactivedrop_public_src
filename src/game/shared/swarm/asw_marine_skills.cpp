@@ -29,6 +29,7 @@ ConVar asw_skill_piercing_base( "asw_skill_piercing_base", "0", FCVAR_REPLICATED
 
 ConVar asw_skill_healing_charges_base( "asw_skill_healing_charges_base", "4", FCVAR_REPLICATED | FCVAR_CHEAT );
 ConVar asw_skill_self_healing_charges_base( "asw_skill_self_healing_charges_base", "2", FCVAR_REPLICATED | FCVAR_CHEAT );
+ConVar asw_skill_healing_medrifle_healing_charges_base( "asw_skill_healing_medrifle_healing_charges_base", "50", FCVAR_REPLICATED | FCVAR_CHEAT );
 ConVar asw_skill_healing_medkit_hps_base( "asw_skill_healing_medkit_hps_base", "50", FCVAR_REPLICATED | FCVAR_CHEAT );
 ConVar asw_skill_healing_hps_base( "asw_skill_healing_hps_base", "25", FCVAR_REPLICATED | FCVAR_CHEAT );
 ConVar asw_skill_healing_grenade_base( "asw_skill_healing_grenade_base", "120", FCVAR_REPLICATED | FCVAR_CHEAT );
@@ -78,6 +79,7 @@ ConVar asw_skill_piercing_step( "asw_skill_piercing_step", "0.20", FCVAR_REPLICA
 
 ConVar asw_skill_healing_charges_step( "asw_skill_healing_charges_step", "1", FCVAR_REPLICATED | FCVAR_CHEAT );
 ConVar asw_skill_self_healing_charges_step( "asw_skill_self_healing_charges_step", "0.5", FCVAR_REPLICATED | FCVAR_CHEAT );
+ConVar asw_skill_healing_medrifle_healing_charges_step( "asw_skill_healing_medrifle_healing_charges_step", "0", FCVAR_REPLICATED | FCVAR_CHEAT );
 ConVar asw_skill_healing_hps_step( "asw_skill_healing_hps_step", "8", FCVAR_REPLICATED | FCVAR_CHEAT );
 ConVar asw_skill_healing_grenade_step( "asw_skill_healing_grenade_step", "30", FCVAR_REPLICATED | FCVAR_CHEAT );
 ConVar asw_skill_healing_gun_charges_step( "asw_skill_healing_gun_charges_step", "10", FCVAR_REPLICATED | FCVAR_CHEAT );
@@ -151,6 +153,8 @@ ConVar asw_skill_accuracy_medrifle_dmg_base( "asw_skill_accuracy_medrifle_dmg_ba
 ConVar asw_skill_accuracy_medrifle_dmg_step( "asw_skill_accuracy_medrifle_dmg_step", "2", FCVAR_REPLICATED | FCVAR_CHEAT );
 ConVar asw_skill_accuracy_ar2_dmg_base( "asw_skill_accuracy_ar2_dmg_base", "0", FCVAR_REPLICATED | FCVAR_CHEAT );
 ConVar asw_skill_accuracy_ar2_dmg_step( "asw_skill_accuracy_ar2_dmg_step", "2", FCVAR_REPLICATED | FCVAR_CHEAT );
+ConVar asw_skill_accuracy_devastator_dmg_base( "asw_skill_accuracy_devastator_dmg_base", "0", FCVAR_REPLICATED | FCVAR_CHEAT );
+ConVar asw_skill_accuracy_devastator_dmg_step( "asw_skill_accuracy_devastator_dmg_step", "1", FCVAR_REPLICATED | FCVAR_CHEAT );
 
 ConVar asw_skill_laser_mines_base( "asw_skill_laser_mines_base", "1", FCVAR_REPLICATED | FCVAR_CHEAT, "Number of laser mines to deploy by marines with no Explosives skills", true, 1, true, 10 );
 ConVar asw_skill_laser_mines_moderate( "asw_skill_laser_mines_moderate", "2", FCVAR_REPLICATED | FCVAR_CHEAT, "Number of laser mines to deploy by marines with moderate(>1) Explosives skills", true, 1, true, 10 );
@@ -261,6 +265,8 @@ float CASW_Marine_Skills::GetSkillBasedValue( CASW_Marine_Profile *pProfile, ASW
 			return asw_skill_healing_amp_gun_charges_base.GetFloat() + asw_skill_healing_amp_gun_charges_step.GetFloat() * iSkillPoints;
 		case ASW_MARINE_SUBSKILL_HEALING_MEDKIT_HPS:
 			return asw_skill_healing_medkit_hps_base.GetFloat() + asw_skill_healing_medkit_hps_step.GetFloat() * iSkillPoints;
+		case ASW_MARINE_SUBSKILL_MEDRIFLE_HEALING_CHARGES:
+			return asw_skill_healing_medrifle_healing_charges_base.GetFloat() + asw_skill_healing_medrifle_healing_charges_step.GetFloat() * iSkillPoints;
 		default:
 			Assert( 0 );
 			return 0.0f;
@@ -348,6 +354,8 @@ float CASW_Marine_Skills::GetSkillBasedValue( CASW_Marine_Profile *pProfile, ASW
 			return asw_skill_accuracy_deagle_dmg_base.GetFloat() + asw_skill_accuracy_deagle_dmg_step.GetFloat() * iSkillPoints;
 		case ASW_MARINE_SUBSKILL_ACCURACY_AR2_DMG:
 			return asw_skill_accuracy_ar2_dmg_base.GetFloat() + asw_skill_accuracy_ar2_dmg_step.GetFloat() * iSkillPoints;
+		case ASW_MARINE_SUBSKILL_ACCURACY_DEVASTATOR_DMG:
+			return asw_skill_accuracy_devastator_dmg_base.GetFloat() + asw_skill_accuracy_devastator_dmg_step.GetFloat() * iSkillPoints;
 		default:
 			Assert( 0 );
 			return 0.0f;

@@ -512,6 +512,11 @@ public:
 				CHECK_LANGUAGE_PREFIX( "accessory_description_" );
 				CHECK_LANGUAGE_PREFIX( "display_type_" );
 
+				for ( int k = 0; k < RD_STEAM_INVENTORY_ITEM_MAX_STYLES; k++ )
+				{
+					CHECK_LANGUAGE_PREFIX( CFmtStr( "style_%d_name_", k ) );
+				}
+
 #undef CHECK_LANGUAGE_PREFIX
 
 				pInventory->GetItemDefinitionProperty( ItemDefIDs[i], PropertyNames[j], NULL, &size );
@@ -1002,7 +1007,7 @@ public:
 				return;
 			}
 
-			if ( FStrEq( event->GetName(), "mission_failure" ) )
+			if ( FStrEq( event->GetName(), "mission_failed" ) )
 			{
 				IncrementStrangePropertyOnStartingItems( 5000, 1 ); // Missions
 				return;
@@ -1087,7 +1092,6 @@ public:
 #endif
 			return;
 		}
-
 	}
 
 	void DebugPrintResult( SteamInventoryResult_t hResult )
@@ -1493,12 +1497,24 @@ class CSteamItemIcon : public vgui::IImage
 public:
 	CSteamItemIcon( const char *szURL )
 	{
+		m_URLHash = CRC32_ProcessSingleBuffer( szURL, V_strlen( szURL ) );
 		m_iTextureID = 0;
 		m_Color.SetColor( 255, 255, 255, 255 );
 		m_nX = 0;
 		m_nY = 0;
 		m_nWide = 512;
 		m_nTall = 512;
+
+		CFmtStr fileName1( "materials/vgui/inventory/cache/%08x.vmt", m_URLHash );
+		CFmtStr fileName2( "materials/vgui/inventory/cache/%08x.vtf", m_URLHash );
+		if ( g_pFullFileSystem->FileExists( fileName1, "MOD" ) && g_pFullFileSystem->FileExists( fileName2, "MOD" ) )
+		{
+			m_iTextureID = vgui::surface()->CreateNewTextureID();
+			vgui::surface()->DrawSetTextureFile( m_iTextureID, fileName1.Access() + V_strlen( "materials/" ), true, false );
+			vgui::surface()->DrawGetTextureSize( m_iTextureID, m_nWide, m_nTall );
+
+			return;
+		}
 
 		ISteamHTTP *pHTTP = SteamHTTP();
 		Assert( pHTTP );
@@ -1581,6 +1597,22 @@ public:
 
 	static CSteamItemIcon *Get( const char *szURL )
 	{
+#ifdef DBGFLAG_ASSERT
+		static CUtlMap<CRC32_t, CUtlString> s_HashToURL( DefLessFunc( CRC32_t ) );
+		CRC32_t iHash = CRC32_ProcessSingleBuffer( szURL, V_strlen( szURL ) );
+		unsigned short iHashIndex = s_HashToURL.Find( iHash );
+		if ( !s_HashToURL.IsValidIndex( iHashIndex ) )
+		{
+			s_HashToURL.Insert( iHash, szURL );
+		}
+		else
+		{
+			// if this fails, it means we have a hash collision!
+			// we need to rename one of the icons in this unusual case.
+			Assert( s_HashToURL[iHashIndex] == szURL );
+		}
+#endif
+
 		UtlSymId_t index = s_ItemIcons.Find( szURL );
 		if ( index != s_ItemIcons.InvalidIndex() )
 		{
@@ -1595,7 +1627,7 @@ private:
 	vgui::HTexture m_iTextureID;
 	Color m_Color;
 	int m_nX, m_nY;
-	unsigned m_nWide, m_nTall;
+	int m_nWide, m_nTall;
 
 	void OnRequestCompleted( HTTPRequestCompleted_t *pParam, bool bIOFailure )
 	{
@@ -1622,22 +1654,46 @@ private:
 		if ( !pHTTP->GetHTTPResponseBodyData( pParam->m_hRequest, data.Base(), pParam->m_unBodySize ) )
 		{
 			Warning( "Failed to get inventory item icon from successful request. Programmer error?\n" );
-			return;
 		}
 
 		pHTTP->ReleaseHTTPRequest( pParam->m_hRequest );
 
 		uint8_t *rgba = NULL;
-		unsigned error = lodepng_decode32( &rgba, &m_nWide, &m_nTall, data.Base(), pParam->m_unBodySize );
+		unsigned error = lodepng_decode32( &rgba, ( unsigned * )&m_nWide, ( unsigned * )&m_nTall, data.Base(), pParam->m_unBodySize );
 		if ( error )
 		{
 			Warning( "Decoding inventory item icon: lodepng error %d: %s\n", error, lodepng_error_text( error ) );
 		}
 
-		m_iTextureID = vgui::surface()->CreateNewTextureID( true );
-		vgui::surface()->DrawSetTextureRGBA( m_iTextureID, rgba, m_nWide, m_nTall );
-
+		IVTFTexture *pVTF = CreateVTFTexture();
+		pVTF->Init( m_nWide, m_nTall, 1, IMAGE_FORMAT_RGBA8888, TEXTUREFLAGS_EIGHTBITALPHA, 1 );
+		if ( rgba )
+			V_memcpy( pVTF->ImageData(), rgba, m_nWide * m_nTall * 4 );
 		free( rgba );
+
+		pVTF->ConvertImageFormat( IMAGE_FORMAT_DEFAULT, false );
+		VtfProcessingOptions opt = { sizeof( opt ), VtfProcessingOptions::OPT_FILTER_NICE };
+		pVTF->SetPostProcessingSettings( &opt );
+		pVTF->PostProcess( false );
+		pVTF->ConvertImageFormat( IMAGE_FORMAT_DXT5, false );
+
+		CUtlBuffer buf;
+		pVTF->Serialize( buf );
+		DestroyVTFTexture( pVTF );
+
+		g_pFullFileSystem->CreateDirHierarchy( "materials/vgui/inventory/cache", "MOD" );
+
+		CFmtStr fileName2( "materials/vgui/inventory/cache/%08x.vtf", m_URLHash );
+		g_pFullFileSystem->WriteFile( fileName2, "MOD", buf );
+
+		buf.Clear();
+		buf.SetBufferType( true, true );
+		buf.PutString( CFmtStr( "UnlitGeneric {\n$basetexture vgui/inventory/cache/%08x\n$translucent 1\n}\n", m_URLHash ) );
+		CFmtStr fileName1( "materials/vgui/inventory/cache/%08x.vmt", m_URLHash );
+		g_pFullFileSystem->WriteFile( fileName1, "MOD", buf );
+
+		m_iTextureID = vgui::surface()->CreateNewTextureID();
+		vgui::surface()->DrawSetTextureFile( m_iTextureID, fileName1.Access() + V_strlen( "materials/" ), true, false );
 	}
 
 	CCallResult<CSteamItemIcon, HTTPRequestCompleted_t> m_HTTPRequestCompleted;
@@ -1947,7 +2003,38 @@ namespace ReactiveDropInventory
 		CRD_ItemInstance reduced{ *this };
 		reduced.FormatDescription( pRichText );
 	}
+
+	vgui::IImage *ItemInstance_t::GetIcon() const
+	{
+		const ItemDef_t *pDef = GetItemDef( ItemDefID );
+		Assert( pDef );
+		if ( !pDef )
+			return NULL;
+
+		int iStyle = GetStyle();
+		if ( pDef->StyleIcons.Count() )
+		{
+			Assert( pDef->StyleIcons.IsValidIndex( iStyle ) );
+			if ( pDef->StyleIcons.IsValidIndex( iStyle ) )
+			{
+				return pDef->StyleIcons[iStyle];
+			}
+		}
+
+		return pDef->Icon;
+	}
 #endif
+
+	int ItemInstance_t::GetStyle() const
+	{
+		UtlSymId_t i = DynamicProps.Find( "style" );
+		if ( i != UTL_INVAL_SYMBOL )
+		{
+			return atoi( DynamicProps[i] );
+		}
+
+		return 0;
+	}
 
 	KeyValues *ItemInstance_t::ToKeyValues() const
 	{
@@ -2130,6 +2217,8 @@ namespace ReactiveDropInventory
 
 		char szKey[256];
 
+		FETCH_PROPERTY( "type" );
+		CUtlString szType = szValue;
 		FETCH_PROPERTY( "item_slot" );
 		pItemDef->ItemSlot = szValue;
 		FETCH_PROPERTY( "tags" );
@@ -2141,11 +2230,13 @@ namespace ReactiveDropInventory
 		FETCH_PROPERTY( "accessory_limit" );
 		if ( *szValue )
 			pItemDef->AccessoryLimit = strtol( szValue, NULL, 10 );
-		Assert( pItemDef->AccessoryLimit <= RD_ITEM_MAX_ACCESSORIES );
+		Assert( pItemDef->AccessoryLimit >= 0 && pItemDef->AccessoryLimit <= RD_ITEM_MAX_ACCESSORIES );
 		FETCH_PROPERTY( "compressed_dynamic_props" );
 		if ( *szValue )
 		{
 			CSplitString CompressedDynamicProps{ szValue, ";" };
+			Assert( CompressedDynamicProps.Count() <= RD_ITEM_MAX_COMPRESSED_DYNAMIC_PROPS - ( pItemDef->AccessoryTag.IsEmpty() ? 0 : pItemDef->AccessoryLimit * RD_ITEM_MAX_COMPRESSED_DYNAMIC_PROPS_PER_ACCESSORY ) );
+			Assert( szType != "tag_tool" || CompressedDynamicProps.Count() <= RD_ITEM_MAX_COMPRESSED_DYNAMIC_PROPS_PER_ACCESSORY );
 			FOR_EACH_VEC( CompressedDynamicProps, i )
 			{
 				pItemDef->CompressedDynamicProps.CopyAndAddToTail( CompressedDynamicProps[i] );
@@ -2166,7 +2257,7 @@ namespace ReactiveDropInventory
 		if ( *szValue )
 			pItemDef->Name = szValue;
 
-		for ( int i = 0; ; i++ )
+		for ( int i = 0; i < RD_STEAM_INVENTORY_ITEM_MAX_STYLES; i++ )
 		{
 			V_snprintf( szKey, sizeof( szKey ), "style_%d_name_english", i );
 			FETCH_PROPERTY( szKey );
@@ -2268,13 +2359,6 @@ namespace ReactiveDropInventory
 			pItemDef->Icon = CSteamItemIcon::Get( szValue );
 		}
 
-		pItemDef->IconSmall = pItemDef->Icon;
-		FETCH_PROPERTY( "icon_url_small" );
-		if ( *szValue )
-		{
-			pItemDef->IconSmall = CSteamItemIcon::Get( szValue );
-		}
-
 		pItemDef->StyleIcons.SetCount( pItemDef->StyleNames.Count() );
 		for ( int i = 0; i < pItemDef->StyleNames.Count(); i++ )
 		{
@@ -2284,6 +2368,9 @@ namespace ReactiveDropInventory
 			if ( *szValue )
 			{
 				pItemDef->StyleIcons[i] = CSteamItemIcon::Get( szValue );
+
+				// first style should always match default icon
+				Assert( i || pItemDef->StyleIcons[i] == pItemDef->Icon );
 			}
 		}
 
@@ -2922,9 +3009,8 @@ void CRD_ItemInstance::FormatDescription( wchar_t *wszBuf, size_t sizeOfBufferIn
 }
 
 #ifdef CLIENT_DLL
-ConVar rd_briefing_item_details_color1( "rd_briefing_item_details_color1", "169 213 255 255", FCVAR_NONE );
-ConVar rd_briefing_item_details_color2( "rd_briefing_item_details_color2", "83 148 192 255", FCVAR_NONE );
-ConVar rd_briefing_item_accessory_color( "rd_briefing_item_accessory_color", "191 191 191 255", FCVAR_NONE );
+ConVar rd_briefing_item_details_color1( "rd_briefing_item_details_color1", "221 238 255 255", FCVAR_NONE );
+ConVar rd_briefing_item_details_color2( "rd_briefing_item_details_color2", "170 204 238 255", FCVAR_NONE );
 
 void CRD_ItemInstance::AppendBBCode( vgui::RichText *pRichText, const wchar_t *wszBuf, Color defaultColor )
 {
@@ -2955,7 +3041,7 @@ void CRD_ItemInstance::AppendBBCode( vgui::RichText *pRichText, const wchar_t *w
 				colorStack.AddToTail( nextColor );
 				pRichText->InsertColorChange( nextColor );
 
-				pBuf += 15;
+				pBuf += 14;
 				continue;
 			}
 
@@ -2966,7 +3052,7 @@ void CRD_ItemInstance::AppendBBCode( vgui::RichText *pRichText, const wchar_t *w
 				colorStack.RemoveMultipleFromTail( 1 );
 				pRichText->InsertColorChange( colorStack.Tail() );
 
-				pBuf += 8;
+				pBuf += 7;
 
 				continue;
 			}
@@ -2992,35 +3078,7 @@ void CRD_ItemInstance::FormatDescription( vgui::RichText *pRichText ) const
 		pRichText->InsertString( L"\n\n" );
 	}
 
-	bool bAnyAccessories = false;
-	FormatDescription( wszBuf, sizeof( wszBuf ), pDef->AccessoryDescription );
-	if ( wszBuf[0] )
-	{
-		AppendBBCode( pRichText, wszBuf, rd_briefing_item_accessory_color.GetColor() );
-		pRichText->InsertString( L"\n" );
-		bAnyAccessories = true;
-	}
-	for ( int i = 0; i < RD_ITEM_MAX_ACCESSORIES; i++ )
-	{
-		if ( m_iAccessory[i] == 0 )
-			continue;
-
-		bAnyAccessories = true;
-		FormatDescription( wszBuf, sizeof( wszBuf ), ReactiveDropInventory::GetItemDef( m_iAccessory[i] )->AccessoryDescription );
-		if ( wszBuf[0] )
-		{
-			AppendBBCode( pRichText, wszBuf, rd_briefing_item_accessory_color.GetColor() );
-			pRichText->InsertString( L"\n" );
-		}
-	}
-
-	if ( bAnyAccessories )
-		pRichText->InsertString( L"\n" );
-
-	if ( pDef->HasInGameDescription )
-		FormatDescription( wszBuf, sizeof( wszBuf ), pDef->Description );
-	else
-		V_UTF8ToUnicode( pDef->Description, wszBuf, sizeof( wszBuf ) );
+	FormatDescription( wszBuf, sizeof( wszBuf ), pDef->Description );
 	AppendBBCode( pRichText, wszBuf, rd_briefing_item_details_color1.GetColor() );
 
 	bool bShowAfterDescription = !pDef->AfterDescriptionOnlyMultiStack;
@@ -3048,8 +3106,63 @@ void CRD_ItemInstance::FormatDescription( vgui::RichText *pRichText ) const
 			AppendBBCode( pRichText, wszBuf, rd_briefing_item_details_color2.GetColor() );
 		}
 	}
+
+	bool bAnyAccessories = false;
+	for ( int i = 0; i < RD_ITEM_MAX_ACCESSORIES; i++ )
+	{
+		if ( m_iAccessory[i] == 0 )
+			continue;
+
+		FormatDescription( wszBuf, sizeof( wszBuf ), ReactiveDropInventory::GetItemDef( m_iAccessory[i] )->AccessoryDescription );
+		if ( wszBuf[0] )
+		{
+			if ( !bAnyAccessories )
+				pRichText->InsertString( L"\n" );
+			bAnyAccessories = true;
+			pRichText->InsertString( L"\n" );
+			AppendBBCode( pRichText, wszBuf, rd_briefing_item_details_color1.GetColor() );
+		}
+	}
+}
+
+vgui::IImage *CRD_ItemInstance::GetIcon() const
+{
+	const ReactiveDropInventory::ItemDef_t *pDef = ReactiveDropInventory::GetItemDef( m_iItemDefID );
+	Assert( pDef );
+	if ( !pDef )
+		return NULL;
+
+	int iStyle = GetStyle();
+	if ( pDef->StyleIcons.Count() )
+	{
+		Assert( pDef->StyleIcons.IsValidIndex( iStyle ) );
+		if ( pDef->StyleIcons.IsValidIndex( iStyle ) )
+		{
+			return pDef->StyleIcons[iStyle];
+		}
+	}
+
+	return pDef->Icon;
 }
 #endif
+
+int CRD_ItemInstance::GetStyle() const
+{
+	const ReactiveDropInventory::ItemDef_t *pDef = ReactiveDropInventory::GetItemDef( m_iItemDefID );
+	Assert( pDef );
+	if ( !pDef )
+		return 0;
+
+	FOR_EACH_VEC( pDef->CompressedDynamicProps, i )
+	{
+		if ( !V_stricmp( pDef->CompressedDynamicProps[i], "style" ) )
+		{
+			return m_nCounter.Get( i );
+		}
+	}
+
+	return 0;
+}
 
 #ifndef CLIENT_DLL
 static void *SendProxy_ProjectileItemDataForOwningPlayer( const SendProp *pProp, const void *pStructBase, const void *pData, CSendProxyRecipients *pRecipients, int objectID )
@@ -3074,6 +3187,11 @@ BEGIN_NETWORK_TABLE_NOBASE( CRD_ProjectileData, DT_RD_ProjectileData )
 	SendPropInt( SENDINFO( m_iOriginalOwnerSteamAccount ), -1, SPROP_UNSIGNED ),
 	SendPropDataTable( "m_InventoryItemData", 0, &REFERENCE_SEND_TABLE( DT_RD_ItemInstance ), SendProxy_ProjectileItemDataForOwningPlayer ),
 	SendPropBool( SENDINFO( m_bFiredByOwner ) ),
+
+	// WORKAROUND: CRD_ProjectileData is horrifyingly unoptimized and causing lag. If we remove it, we break demos recorded since April 20th. Instead, make it just not do anything.
+	SendPropExclude( "DT_RD_ProjectileData", "m_iOriginalOwnerSteamAccount" ),
+	SendPropExclude( "DT_RD_ProjectileData", "m_InventoryItemData" ),
+	SendPropExclude( "DT_RD_ProjectileData", "m_bFiredByOwner" ),
 #endif
 END_NETWORK_TABLE()
 

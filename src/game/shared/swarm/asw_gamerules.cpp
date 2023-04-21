@@ -764,7 +764,7 @@ static void UpdateGameRulesOverrideAllowRotateCamera( IConVar *var, const char *
 	}
 }
 #endif
-ConVar rd_player_bots_allowed( "rd_player_bots_allowed", "1", FCVAR_CHEAT | FCVAR_REPLICATED, "If 0 will prevent players from adding bots"
+ConVar rd_player_bots_allowed( "rd_player_bots_allowed", "1", FCVAR_REPLICATED, "If 0 will prevent players from adding bots"
 #ifdef GAME_DLL
 	, DeselectMarineBots );
 #else
@@ -4296,6 +4296,13 @@ void CAlienSwarm::GiveStartingWeaponToMarine( CASW_Marine *pMarine, int iEquipIn
 			iSecondaryAmmo = MarineSkills()->GetSkillBasedValueByMarine( pMarine, ASW_MARINE_SKILL_DRUGS, ASW_MARINE_SUBSKILL_HEALAMP_GUN_AMP_CHARGES );
 		}
 	}
+	if ( !stricmp( szWeaponClass, "asw_weapon_medrifle" ) )
+	{
+		if ( pMarine->GetMarineProfile() && pMarine->GetMarineProfile()->CanUseFirstAid() )
+		{
+			iSecondaryAmmo = MarineSkills()->GetSkillBasedValueByMarine( pMarine, ASW_MARINE_SKILL_HEALING, ASW_MARINE_SUBSKILL_MEDRIFLE_HEALING_CHARGES );
+		}
+	}
 	if ( !stricmp( szWeaponClass, "asw_weapon_flares" ) ||
 		!stricmp( szWeaponClass, "asw_weapon_gas_grenades" ) ||
 		!stricmp( szWeaponClass, "asw_weapon_grenades" ) ||
@@ -7438,6 +7445,8 @@ void CAlienSwarm::ClientSettingsChanged( CBasePlayer *pPlayer )
 			engine->ClientCommand( pPlayer->edict(), "name \"%s\"", pszOldName );
 		}
 	}
+
+	pASWPlayer->m_iWantsAutoRecord = V_atoi( engine->GetClientConVarValue( pPlayer->entindex(), "rd_auto_record_lobbies" ) );
 
 	const char *pszFov = engine->GetClientConVarValue( pPlayer->entindex(), "fov_desired" );
 	if ( pszFov )

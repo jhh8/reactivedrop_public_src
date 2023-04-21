@@ -92,6 +92,7 @@ public:
 	virtual void SecondaryAttack();
 	virtual bool SecondaryAttackUsesPrimaryAmmo() { return false; }
 	virtual bool SecondaryAttackEqualsPrimary() { return false; }
+	virtual bool HasBuckshotSecondaryAttack() { return false; }
 	virtual bool ReloadOrSwitchWeapons( void );
 	virtual const char *GetASWShootSound( int iIndex, int &iPitch );
 	virtual void WeaponSound( WeaponSound_t sound_type, float soundtime = 0.0f );
@@ -146,9 +147,10 @@ public:
 	virtual bool IsOffensiveWeapon() { return true; }		// is this weapon an offensive gun type weapon (as opposed to a utility item)
 	virtual bool DisplayClipsDoubled() { return false; }    // dual weilded guns should show ammo doubled up to complete the illusion of holding two guns
 	virtual bool CanDoForcedAction( int iForcedAction ) { return true; }		// check if we're allowed to perform a forced action (certain abilities limit this)
+	virtual float GetPassiveMeleeDamageScale() { return 1.0f; }
+	// note: these only work for player, not spectator
 	void PlaySoundDirectlyToOwner( const char *szSoundName );
 	void PlaySoundToOthers( const char *szSoundName );
-	virtual float GetPassiveMeleeDamageScale() { return 1.0f; }
 
 	virtual void OnStoppedFiring();
 	virtual void OnStartedRoll();
