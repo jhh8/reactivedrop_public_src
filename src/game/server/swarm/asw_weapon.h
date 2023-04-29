@@ -24,6 +24,7 @@ public:
 	CASW_Weapon();
 	virtual ~CASW_Weapon();	
 	virtual void Precache();
+	virtual bool KeyValue( const char *szKeyName, const char *szValue );
 	bool DestroyIfEmpty( bool bDestroyWhenActive, bool bCheckSecondaryAmmo=false );
 
 	virtual void ItemPostFrame(void);
@@ -192,9 +193,9 @@ public:
 	virtual const char *GetMagazineGibModelName() const { return NULL; }
 	virtual int GetMagazineGibModelSkin() const { return 0; }
 
-	CNetworkVar( AccountID_t, m_iOriginalOwnerSteamAccount );
-	CHandle<CASW_Player> m_hOriginalOwnerPlayer;
-	int m_iInventoryEquipSlotIndex;
+	CNetworkHandle( CASW_Player, m_hOriginalOwnerPlayer );
+	CNetworkVar( int, m_iInventoryEquipSlot );
+	bool IsInventoryEquipSlotValid() const;
 
 protected:
 	int m_iEquipmentListIndex;
